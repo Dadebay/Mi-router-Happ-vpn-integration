@@ -60,8 +60,11 @@ def fetch_subscription(url):
     if parsed.scheme != 'https' or not parsed.hostname:
         raise ValueError('Abonelik adresi https:// ile başlamalı.')
     request = urllib.request.Request(url, headers={'User-Agent': 'HappRouter/1.0'})
-    with urllib.request.urlopen(request, timeout=20) as response:
-        raw = response.read(512 * 1024 + 1)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read(512 * 1024 + 1)
+    except Exception as exc:
+        raise RuntimeError('Abonelik adresi okunamadı. Adresi ve internet bağlantısını kontrol edin.') from exc
     if len(raw) > 512 * 1024:
         raise ValueError('Abonelik yanıtı çok büyük.')
     text = raw.decode('utf-8', 'replace').strip()
@@ -116,7 +119,8 @@ def build_config(base, outbounds):
     if not fallback:
         raise ValueError('Çalışan Happ VPN yedek profili bulunamadı; mevcut bağlantı korunuyor.')
     config = dict(base)
-    config['inbounds'] = list(base.get('inbounds', [])) + [
+    config['inbounds'] = [item for item in base.get('inbounds', [])
+                          if item.get('tag') != 'metrics-in'] + [
         {'tag': 'metrics-in', 'listen': '127.0.0.1', 'port': 11111,
          'protocol': 'dokodemo-door',
          'settings': {'address': '127.0.0.1', 'port': 11111, 'network': 'tcp'}}]
@@ -184,11 +188,9 @@ def install_subscription(url, expires_at):
 
 
 def status():
-    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__METRICS__\\n'; timeout 3 wget -qO- http://127.0.0.1:11111/debug/vars 2>/dev/null; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; netstat -lnt | grep -q ':1080 ' && echo ready || echo starting; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
+    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__METRICS__\\n'; wget -T 3 -qO- http://127.0.0.1:11111/debug/vars 2>/dev/null; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; netstat -lnt | grep -q ':1080 ' && echo ready || echo starting; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
     raw = ssh(command, timeout=35).decode('utf-8', 'replace')
     sections = {}
-    for part in re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|METRICS|NODES|SYSTEM)__\n', raw)[1:]:
-        pass
     pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|METRICS|NODES|SYSTEM)__\n', raw)
     for index in range(1, len(pieces) - 1, 2):
         sections[pieces[index]] = pieces[index + 1].strip()
@@ -242,14 +244,20 @@ def status():
     vpn_bytes = ({'rx': stats.get('downlink', 0), 'tx': stats.get('uplink', 0)}
                  if metrics else None)
     system = sections.get('SYSTEM', '').splitlines()
+    # Router marker files may have no trailing newline; parse fields separately.
+    tail = sections.get('SYSTEM', '')
+    expiry_match = re.search(r'(?m)^([0-9]{10})(vpn|direct)?$', tail)
+    expires_at = int(expiry_match.group(1)) if expiry_match else 0
+    mode_match = re.search(r'(vpn|direct)\s*$', tail)
+    mode = mode_match.group(1) if mode_match else 'vpn'
     emit({'ok': True, 'vpnRunning': len(system) >= 2 and system[1].strip() == 'ready',
           'uptimeSeconds': float(system[0].split()[0]) if system else 0,
           'wifi': netdev.get('phy0-ap0', {}), 'wan': netdev.get('eth0.2', {}),
           'vpnBytes': vpn_bytes, 'devices': devices, 'nodes': nodes,
           'best': best['tag'] if best else 'happ-vpn',
           'fallback': best is None, 'metricsAvailable': bool(metrics),
-          'expiresAt': int(system[2]) if len(system) >= 3 and system[2].isdigit() else 0,
-          'mode': system[3] if len(system) >= 4 else 'vpn',
+          'expiresAt': expires_at,
+          'mode': mode,
           'updatedAt': int(time.time())})
 
 
@@ -258,6 +266,13 @@ def set_expiry(expires_at):
         raise ValueError('Gelecekteki abonelik bitiş tarihini seçin.')
     ssh('umask 077; cat > /etc/happvpn/expires-at', stdin=str(expires_at).encode('ascii'))
     emit({'ok': True, 'note': 'Abonelik bitiş tarihi kaydedildi.'})
+
+
+def set_mode(mode):
+    if mode not in ('vpn', 'direct'):
+        raise ValueError('Geçersiz internet modu.')
+    ssh(f'/etc/happvpn/mode.sh {mode}', timeout=45)
+    emit({'ok': True, 'note': 'Router internet modu değiştirildi.', 'mode': mode})
 
 
 def active_test():
@@ -315,7 +330,8 @@ def active_test():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['status', 'preview', 'test', 'apply', 'expiry'])
+    parser.add_argument('command', choices=['status', 'preview', 'test', 'apply', 'expiry',
+                                            'mode-vpn', 'mode-direct'])
     parser.add_argument('--url')
     parser.add_argument('--expires', type=int)
     args = parser.parse_args()
@@ -334,6 +350,8 @@ def main():
             active_test()
         elif args.command == 'expiry':
             set_expiry(args.expires)
+        elif args.command in ('mode-vpn', 'mode-direct'):
+            set_mode(args.command.removeprefix('mode-'))
     except Exception as exc:
         emit({'ok': False, 'error': str(exc)})
         sys.exit(1)

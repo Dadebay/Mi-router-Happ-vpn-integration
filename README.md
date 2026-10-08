@@ -9,6 +9,8 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt ve Xray için macOS kontrol paneli.
 - Abonelikten gelen sunucu adları, ülke etiketleri ve varsa gecikme ölçümleri
 - Yeni HTTPS abonelik URL'sini kontrol etme ve router'a kurma
 - Abonelik bitiş tarihi ve süre dolunca doğrudan internete geçiş görevi
+- Genel Bakış, VPN Ayarları, Router ve Cihazlar için ayrı gezinme sayfaları
+- Router sayfasından VPN/doğrudan internet modu arasında elle geçiş
 
 VLESS WebSocket/TLS adaylarının ölçümü ve otomatik seçim üzerinde çalışılıyor. Şu anda kullanıcı trafiği çalışan Happ Shadowsocks profiline sabitlenmiştir; adaylar canlı trafiği değiştirmez. `n/a`, ölçümün bulunmadığını veya başarısız olduğunu gösterir. Ülke bayrakları sağlayıcının etiketidir, fiziksel konum kanıtı değildir.
 
@@ -23,6 +25,7 @@ Yeni abonelik için önce **Profilleri kontrol et**, ardından **Router'a kur** 
 ```sh
 swift build -c release
 python3 -m py_compile Scripts/routerctl.py
+./Scripts/build-app.sh
 ```
 
 Xray 25.1.30 için yerel macOS doğrulama ikilisi `Tools/xray-validator` konumuna ayrı sağlanmalıdır; ikili depoya eklenmez. Uygulamayı paketlerken `Scripts/routerctl.py` dosyasını kaynaklara ekleyin. Gilroy ve Qurova fontlarını kullanıcıya ait yerel font klasöründen paketleyin; lisanslı font dosyaları depoda bulunmaz.
@@ -32,3 +35,5 @@ Abonelik URL'si uygulamada Keychain'de, router'da root erişimli dosyada saklan�
 ## Sınırlar
 
 Router 64 MB RAM ve tek çekirdekli. İlk router ölçüm ve otomatik geçiş denemesi, sağlayıcı bağlantıları router WAN'ından zaman aşımına uğradığı için canlı trafiğe alınmadı. Süre dolumu sonrası doğrudan internet geçişi kuruldu, ancak uçtan uca test edilmedi.
+
+Elle doğrudan internet ve VPN moduna geçiş router'da doğrulandı; geçişten sonra VPN çıkış IP'si tekrar başarıyla ölçüldü. Telefonla doğrudan mod trafik testi ayrıca yapılmalıdır.

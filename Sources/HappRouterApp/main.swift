@@ -239,6 +239,24 @@ private final class DashboardModel: ObservableObject {
             } catch { message = error.localizedDescription }
         }
     }
+
+    func changeMode(_ mode: String) {
+        guard mode == "vpn" || mode == "direct" else { return }
+        busy = true
+        message = "Router internet modu değiştiriliyor…"
+        Task {
+            defer { busy = false }
+            do {
+                let data = try await Task.detached(priority: .utility) {
+                    try Backend.run(mode == "vpn" ? "mode-vpn" : "mode-direct")
+                }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                message = result.ok ? (mode == "vpn" ? "VPN modu açıldı" : "Normal internet paylaşımı açıldı") :
+                    (result.error ?? "Mod değiştirilemedi")
+                if result.ok { refresh() }
+            } catch { message = error.localizedDescription }
+        }
+    }
 }
 
 private func bytes(_ value: Int64?) -> String {
@@ -267,138 +285,346 @@ private struct StatCard: View {
     }
 }
 
+private enum AppPage: String, CaseIterable, Identifiable {
+    case overview, vpn, router, devices
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .overview: "Genel Bakış"
+        case .vpn: "VPN Ayarları"
+        case .router: "Router"
+        case .devices: "Cihazlar"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .overview: "square.grid.2x2.fill"
+        case .vpn: "shield.lefthalf.filled"
+        case .router: "wifi.router.fill"
+        case .devices: "laptopcomputer.and.iphone"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .overview: "Bağlantı ve kullanım durumunun özeti"
+        case .vpn: "Sunucular, bağlantı testi ve abonelik"
+        case .router: "Ağ, trafik ve çalışma bilgileri"
+        case .devices: "HappVPN ağına bağlı cihazlar"
+        }
+    }
+}
+
 private struct ContentView: View {
     @StateObject private var model = DashboardModel()
+    @State private var selectedPage: AppPage? = .overview
     private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("HappRouter").font(AppFont.display(32))
-                        Text("Xiaomi 4C · HappVPN ağı").foregroundStyle(.secondary)
+        NavigationSplitView {
+            List(selection: $selectedPage) {
+                Section("HAPPROUTER") {
+                    ForEach(AppPage.allCases) { page in
+                        Label(page.title, systemImage: page.symbol)
+                            .tag(page)
+                            .padding(.vertical, 5)
                     }
-                    Spacer()
-                    Label(model.status?.mode == "direct" ? "Normal internet" :
-                          (model.status?.vpnRunning == true ? "VPN çalışıyor" : "Bağlantı kontrol ediliyor"),
-                          systemImage: model.status?.mode == "direct" ? "network" :
-                          (model.status?.vpnRunning == true ? "checkmark.shield.fill" : "exclamationmark.shield"))
-                        .foregroundStyle(model.status?.mode == "direct" ? .blue :
-                                         (model.status?.vpnRunning == true ? .green : .orange))
                 }
-                HStack(spacing: 12) {
-                    StatCard(title: "VPN çıkış IP", value: model.exitIP ?? "Test et", caption: "Router üzerinden ölçülür", symbol: "globe.europe.africa")
-                    StatCard(title: "Wi-Fi veri", value: bytes((model.status?.wifi.rx ?? 0) + (model.status?.wifi.tx ?? 0)), caption: "Son açılıştan beri", symbol: "wifi")
-                    StatCard(title: "VPN veri", value: model.status?.vpnBytes == nil ? "—" : bytes((model.status?.vpnBytes?.rx ?? 0) + (model.status?.vpnBytes?.tx ?? 0)), caption: "Xray başladığından beri", symbol: "arrow.up.arrow.down")
-                    StatCard(title: "Bağlı cihaz", value: "\(model.status?.devices.count ?? 0)", caption: "Wi-Fi ve kablo", symbol: "laptopcomputer.and.iphone")
-                }
-                HStack {
-                    Button("VPN bağlantısını test et") { model.test() }.disabled(model.busy)
-                    Button("Yenile") { model.refresh() }.disabled(model.busy)
-                    Spacer()
-                    Text(model.message).font(AppFont.regular(12)).foregroundStyle(.secondary).lineLimit(2)
-                }
-                nodeSection
-                deviceSection
-                subscriptionSection
             }
-            .padding(24)
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 215, max: 245)
+        } detail: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    pageHeader
+                    switch selectedPage ?? .overview {
+                    case .overview: overviewPage
+                    case .vpn: vpnPage
+                    case .router: routerPage
+                    case .devices: devicesPage
+                    }
+                }
+                .frame(maxWidth: 980, alignment: .leading)
+                .padding(28)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
         }
-        .frame(minWidth: 850, minHeight: 650)
+        .frame(minWidth: 940, minHeight: 660)
         .font(AppFont.regular(14))
         .onAppear { model.refresh() }
         .onReceive(timer) { _ in model.refresh() }
     }
 
+    private var pageHeader: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text((selectedPage ?? .overview).title)
+                    .font(AppFont.display(30))
+                Text((selectedPage ?? .overview).subtitle)
+                    .font(AppFont.regular(13))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            statusPill
+        }
+        .padding(.bottom, 4)
+    }
+
+    private var statusPill: some View {
+        let direct = model.status?.mode == "direct"
+        let running = model.status?.vpnRunning == true
+        return Label(direct ? "Normal internet" : (running ? "Xray çalışıyor" : "Kontrol ediliyor"),
+                     systemImage: direct ? "network" : (running ? "checkmark.shield.fill" : "hourglass"))
+            .font(AppFont.semiBold(12))
+            .foregroundStyle(direct ? Color.blue : (running ? Color.green : Color.orange))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(direct ? Color.blue.opacity(0.11) : (running ? Color.green.opacity(0.11) : Color.orange.opacity(0.11)),
+                        in: Capsule())
+    }
+
+    private var overviewPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            LazyVGrid(columns: columns, spacing: 12) {
+                StatCard(title: "VPN çıkış IP", value: model.exitIP ?? "Test et",
+                         caption: "Router üzerinden doğrulanır", symbol: "globe.europe.africa")
+                StatCard(title: "Wi-Fi verisi", value: bytes((model.status?.wifi.rx ?? 0) + (model.status?.wifi.tx ?? 0)),
+                         caption: "Son açılıştan beri", symbol: "wifi")
+                StatCard(title: "Bağlı cihaz", value: "\(model.status?.devices.count ?? 0)",
+                         caption: "Wi-Fi ve kablo", symbol: "laptopcomputer.and.iphone")
+                StatCard(title: "Kalan gün", value: daysRemaining.map(String.init) ?? "—",
+                         caption: "Abonelik süresi", symbol: "calendar")
+            }
+            actionBar
+            sectionPanel {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Bağlantı").font(AppFont.bold(18))
+                    Text(model.status?.mode == "direct"
+                         ? "Abonelik süresi doldu; router normal interneti paylaşıyor."
+                         : "HappVPN ağı router üzerindeki VPN yapılandırmasını kullanıyor.")
+                        .foregroundStyle(.secondary)
+                    if let exitIP = model.exitIP {
+                        Label("Test edilen çıkış: \(exitIP)", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Text("Sunucu listesi ve abonelik için VPN Ayarları bölümünü aç.")
+                        .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var vpnPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            sectionPanel {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("VPN bağlantısı").font(AppFont.bold(18))
+                        Spacer()
+                        Text(model.exitIP ?? "Henüz test edilmedi")
+                            .monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    Text("Çıkış IP testi router'ın VPN bağlantısı üzerinden yapılır.")
+                        .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                    Button("VPN bağlantısını test et") { model.test() }
+                        .disabled(model.busy || model.status?.mode == "direct")
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            subscriptionSection
+            sectionPanel { nodeSection }
+            feedbackLine
+        }
+    }
+
+    private var routerPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            LazyVGrid(columns: columns, spacing: 12) {
+                StatCard(title: "Wi-Fi trafiği", value: bytes((model.status?.wifi.rx ?? 0) + (model.status?.wifi.tx ?? 0)),
+                         caption: "Son açılıştan beri", symbol: "wifi")
+                StatCard(title: "WAN trafiği", value: bytes((model.status?.wan.rx ?? 0) + (model.status?.wan.tx ?? 0)),
+                         caption: "Son açılıştan beri", symbol: "network")
+                StatCard(title: "VPN trafiği", value: model.status?.vpnBytes == nil ? "—" :
+                         bytes((model.status?.vpnBytes?.rx ?? 0) + (model.status?.vpnBytes?.tx ?? 0)),
+                         caption: "Xray başladığından beri", symbol: "arrow.up.arrow.down")
+                StatCard(title: "Çalışma süresi", value: uptimeText,
+                         caption: "Router son açılıştan beri", symbol: "clock")
+            }
+            sectionPanel {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Ağ bilgileri").font(AppFont.bold(18))
+                    LabeledContent("Router adresi", value: "192.168.1.1")
+                    LabeledContent("Wi-Fi ağı", value: "HappVPN")
+                    LabeledContent("İnternet modu", value: model.status?.mode == "direct" ? "Doğrudan" : "VPN")
+                    LabeledContent("Xray", value: model.status?.vpnRunning == true ? "Çalışıyor" : "Kontrol ediliyor")
+                    Button("Durumu yenile") { model.refresh() }.disabled(model.busy)
+                }
+            }
+            sectionPanel {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("İnternet paylaşım modu").font(AppFont.bold(18))
+                    Text("VPN modunda bağlı cihazlar Happ üzerinden çıkar. Normal internet modunda router WAN bağlantısını paylaşır.")
+                        .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                    HStack {
+                        Button("VPN modunu aç") { model.changeMode("vpn") }
+                            .disabled(model.busy || model.status?.mode == "vpn" || model.status?.vpnRunning != true)
+                        Button("Normal interneti aç") { model.changeMode("direct") }
+                            .disabled(model.busy || model.status?.mode == "direct")
+                    }
+                }
+            }
+            feedbackLine
+        }
+    }
+
+    private var devicesPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            sectionPanel { deviceSection }
+            Button("Cihazları yenile") { model.refresh() }.disabled(model.busy)
+            feedbackLine
+        }
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 10) {
+            Button("VPN çıkışını test et") { model.test() }
+                .disabled(model.busy || model.status?.mode == "direct")
+                .buttonStyle(.borderedProminent)
+            Button("Yenile") { model.refresh() }.disabled(model.busy)
+            Spacer()
+            Text(model.message).font(AppFont.regular(12))
+                .foregroundStyle(.secondary).lineLimit(2)
+        }
+    }
+
+    private var feedbackLine: some View {
+        Text(model.message).font(AppFont.regular(12))
+            .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func sectionPanel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+            .background(.quaternary.opacity(0.48), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var daysRemaining: Int? {
+        guard let expires = model.status?.expiresAt, expires > 0 else { return nil }
+        return max(0, Int(ceil(Date(timeIntervalSince1970: TimeInterval(expires)).timeIntervalSinceNow / 86400)))
+    }
+
+    private var uptimeText: String {
+        let seconds = Int(model.status?.uptimeSeconds ?? 0)
+        return seconds >= 86400 ? "\(seconds / 86400) gün" : "\(seconds / 3600) saat"
+    }
+
     private var nodeSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("VPN sunucuları").font(AppFont.bold(19))
+                Text("VPN sunucuları").font(AppFont.bold(18))
                 Spacer()
-                Text("Sunucu ölçümleri izlenir; otomatik geçiş doğrulanıyor")
+                Text("Otomatik geçiş doğrulanıyor")
                     .font(AppFont.regular(12)).foregroundStyle(.secondary)
             }
-            if model.status?.fallback == true {
-                Label("Ölçüm yoksa çalışan Happ profili kullanılır", systemImage: "arrow.uturn.backward")
-                    .font(.caption).foregroundStyle(.orange)
-            }
+            Label("Trafik şu anda Happ profili üzerinden yönleniyor", systemImage: "info.circle")
+                .font(AppFont.regular(12)).foregroundStyle(.secondary)
             let nodes = model.status?.nodes ?? model.previewNodes
             if nodes.isEmpty {
-                Text("Henüz sunucu listesi kurulmadı.").foregroundStyle(.secondary).padding(.vertical, 12)
+                Text("Henüz sunucu listesi kurulmadı.")
+                    .foregroundStyle(.secondary).padding(.vertical, 12)
             } else {
                 ForEach(nodes) { node in
-                    HStack {
+                    HStack(spacing: 12) {
                         Text(node.name).lineLimit(1)
                         Spacer()
                         if model.status?.best == node.tag && node.alive == true {
                             Text("En düşük ms").font(.caption.bold()).foregroundStyle(.green)
                         }
                         Text(node.alive == true ? "\(Int(node.delay ?? 0)) ms" : "n/a")
-                            .monospacedDigit().foregroundStyle(node.alive == true ? .primary : .secondary)
-                            .frame(width: 80, alignment: .trailing)
+                            .monospacedDigit()
+                            .foregroundStyle(node.alive == true ? .primary : .secondary)
+                            .frame(width: 78, alignment: .trailing)
                     }
                     .padding(.vertical, 5)
-                    Divider()
+                    if node.id != nodes.last?.id { Divider() }
                 }
             }
         }
     }
 
     private var deviceSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Bağlı cihazlar").font(AppFont.bold(19))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Bağlı cihazlar").font(AppFont.bold(18))
+                Spacer()
+                Text("\(model.status?.devices.count ?? 0) cihaz")
+                    .font(AppFont.regular(12)).foregroundStyle(.secondary)
+            }
             if model.status?.devices.isEmpty != false {
-                Text("Şu anda cihaz görünmüyor.").foregroundStyle(.secondary)
+                ContentUnavailableView("Cihaz görünmüyor", systemImage: "wifi.exclamationmark",
+                                       description: Text("Telefon veya bilgisayar HappVPN ağına bağlandığında burada görünür."))
+                    .frame(maxWidth: .infinity)
             }
             ForEach(model.status?.devices ?? []) { device in
-                HStack {
+                HStack(spacing: 12) {
                     Image(systemName: device.type == "Wi-Fi" ? "wifi" : "cable.connector")
                         .foregroundStyle(.teal)
-                    Text(device.name?.isEmpty == false ? device.name! : device.mac)
-                    Text(device.ip ?? "").font(.caption).foregroundStyle(.secondary)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(device.name?.isEmpty == false ? device.name! : device.mac)
+                            .font(AppFont.semiBold(13))
+                        Text(device.ip ?? device.mac).font(AppFont.regular(11))
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
-                    Text(device.type ?? "").font(.caption).foregroundStyle(.secondary)
+                    Text(device.type ?? "").font(AppFont.regular(12))
+                        .foregroundStyle(.secondary)
                 }
+                .padding(.vertical, 6)
                 Divider()
             }
         }
     }
 
     private var subscriptionSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Aboneliği yenile").font(AppFont.bold(19))
-            Text("Yeni satın aldığın HTTPS abonelik adresini buraya gir. Önce profilleri oku, sonra router'a kur.")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                DatePicker("Abonelik bitiş günü", selection: $model.expiration, displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                Button("Tarihi kaydet") { model.saveExpiry() }.disabled(model.busy)
-            }
-            if let expires = model.status?.expiresAt, expires > 0 {
-                let days = max(0, Int(ceil(Date(timeIntervalSince1970: TimeInterval(expires)).timeIntervalSinceNow / 86400)))
-                Text("Kalan süre: \(days) gün · süre bittiğinde router normal interneti paylaşır")
-                    .font(AppFont.medium(12)).foregroundStyle(days > 3 ? Color.secondary : Color.orange)
-            }
-            HStack {
-                Group {
-                    if model.showSubscription {
-                        TextField("https://…", text: $model.subscription)
-                    } else {
-                        SecureField("https://…", text: $model.subscription)
+        sectionPanel {
+            VStack(alignment: .leading, spacing: 13) {
+                Text("Abonelik").font(AppFont.bold(18))
+                Text("Yeni HTTPS abonelik adresini önce kontrol et, sonra router'a kur.")
+                    .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                HStack {
+                    DatePicker("Bitiş günü", selection: $model.expiration, displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                    Button("Tarihi kaydet") { model.saveExpiry() }.disabled(model.busy)
+                }
+                if let days = daysRemaining {
+                    Label("\(days) gün kaldı · süre dolunca normal internet paylaşılır", systemImage: "calendar")
+                        .font(AppFont.medium(12))
+                        .foregroundStyle(days > 3 ? Color.secondary : Color.orange)
+                }
+                HStack {
+                    Group {
+                        if model.showSubscription {
+                            TextField("https://…", text: $model.subscription)
+                        } else {
+                            SecureField("https://…", text: $model.subscription)
+                        }
+                    }
+                    .textFieldStyle(.roundedBorder)
+                    Button(model.showSubscription ? "Gizle" : "Göster") {
+                        model.showSubscription.toggle()
                     }
                 }
-                .textFieldStyle(.roundedBorder)
-                Button(model.showSubscription ? "Gizle" : "Göster") { model.showSubscription.toggle() }
-            }
-            HStack {
-                Button("Profilleri kontrol et") { model.preview() }.disabled(model.busy)
-                Button("Router'a kur") { model.apply() }.disabled(model.busy || model.previewNodes.isEmpty)
-                    .buttonStyle(.borderedProminent)
+                HStack(spacing: 10) {
+                    Button("Profilleri kontrol et") { model.preview() }.disabled(model.busy)
+                    Button("Router'a kur") { model.apply() }
+                        .disabled(model.busy || model.previewNodes.isEmpty)
+                        .buttonStyle(.borderedProminent)
+                }
             }
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
