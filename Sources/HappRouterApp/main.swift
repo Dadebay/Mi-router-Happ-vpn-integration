@@ -452,7 +452,7 @@ private struct ContentView: View {
                     Text("Çıkış IP testi router'ın VPN bağlantısı üzerinden yapılır.")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
                     Button("VPN bağlantısını test et") { model.test() }
-                        .disabled(model.busy || model.status?.mode == "direct")
+                        .disabled(model.busy || model.status?.vpnRunning != true)
                         .buttonStyle(.borderedProminent)
                 }
             }
@@ -519,7 +519,7 @@ private struct ContentView: View {
     private var actionBar: some View {
         HStack(spacing: 10) {
             Button("VPN çıkışını test et") { model.test() }
-                .disabled(model.busy || model.status?.mode == "direct")
+                .disabled(model.busy || model.status?.vpnRunning != true)
                 .buttonStyle(.borderedProminent)
             Button("Yenile") { model.refresh() }.disabled(model.busy)
             Spacer()
