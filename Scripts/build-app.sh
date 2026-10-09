@@ -8,9 +8,12 @@ VALIDATOR="$PROJECT/Tools/xray-validator"
 
 cd "$PROJECT"
 swift build -c release
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Fonts"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Fonts" "$APP/Contents/Resources/RouterScripts"
 cp .build/release/HappRouter "$APP/Contents/MacOS/HappRouter"
 cp Scripts/routerctl.py "$APP/Contents/Resources/routerctl.py"
+for name in mode.sh expiry-check.sh probe-nodes.lua usage-sample.lua; do
+  cp "Scripts/$name" "$APP/Contents/Resources/RouterScripts/$name"
+done
 if [ -x "$VALIDATOR" ]; then
   cp "$VALIDATOR" "$APP/Contents/Resources/xray-validator"
 fi

@@ -24,6 +24,12 @@ HOME = Path.home() / '.happ-router'
 HOST = '192.168.1.1'
 SSH_KEY = HOME / 'router_rsa'
 KNOWN_HOSTS = HOME / 'known_hosts'
+ROUTER_SCRIPTS = ('mode.sh', 'expiry-check.sh', 'probe-nodes.lua', 'usage-sample.lua')
+CRON_ENTRIES = (
+    '*/5 * * * * /etc/happvpn/expiry-check.sh',
+    '* * * * * /etc/happvpn/usage-sample.lua',
+    '*/30 * * * * /etc/happvpn/probe-nodes.lua',
+)
 
 
 def setup():
@@ -52,6 +58,60 @@ def ssh(command, stdin=None, timeout=60):
 
 def emit(value):
     print(json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+
+
+def script_directory():
+    bundled = Path(__file__).parent / 'RouterScripts'
+    return bundled if bundled.is_dir() else Path(__file__).parent
+
+
+def install_helpers():
+    board = json.loads(ssh('ubus call system board').decode('utf-8'))
+    if board.get('board_name') != 'xiaomi,mi-router-4c':
+        raise RuntimeError('Bu kurulum yalnızca Xiaomi Mi Router 4C için hazırlanmıştır.')
+    requirements = ssh("for cmd in xray lua5.3 nft iw uci; do command -v \"$cmd\" >/dev/null || echo \"$cmd\"; done; "
+                       "lua5.3 -e 'require(\"socket\")' >/dev/null 2>&1 || echo lua-socket; "
+                       "test -s /etc/xray/config.json || echo xray-config; "
+                       "test -s /etc/happvpn/happvpn.nft.vpn || echo vpn-firewall-backup",
+                       timeout=20).decode('utf-8').splitlines()
+    if requirements:
+        raise RuntimeError('Router hazırlığı eksik: ' + ', '.join(requirements) +
+                           '. OpenWrt/Xray temel kurulumu gerekli; çalışan ağ ayarları değiştirilmedi.')
+    source = script_directory()
+    missing = [name for name in ROUTER_SCRIPTS if not (source / name).is_file()]
+    if missing:
+        raise RuntimeError('Uygulama kurulum dosyaları eksik: ' + ', '.join(missing))
+    ssh('umask 077; mkdir -p /etc/happvpn; test -d /etc/happvpn', timeout=20)
+    for name in ROUTER_SCRIPTS:
+        content = (source / name).read_bytes()
+        ssh(f'umask 077; cat > /etc/happvpn/.{name}.new && '
+            f'chmod 755 /etc/happvpn/.{name}.new && '
+            f'mv /etc/happvpn/.{name}.new /etc/happvpn/{name}',
+            stdin=content, timeout=20)
+    # Keep user-defined cron jobs and replace only the entries owned by HappRouter.
+    existing = ssh('crontab -l 2>/dev/null || true', timeout=20).decode('utf-8').splitlines()
+    retained = [line for line in existing if not any('/etc/happvpn/' + name in line
+                for name in ROUTER_SCRIPTS)]
+    cron = '\n'.join(retained + list(CRON_ENTRIES)) + '\n'
+    ssh('umask 077; cat > /tmp/happvpn-cron.new && '
+        'crontab /tmp/happvpn-cron.new && rm /tmp/happvpn-cron.new && '
+        '/etc/init.d/cron enable && /etc/init.d/cron restart',
+        stdin=cron.encode('utf-8'), timeout=30)
+    # Direct mode stays active until a real VPN exit test succeeds.
+    emit({'ok': True, 'note': 'Router yardımcıları ve ölçüm görevleri kuruldu. '
+          'Aboneliği ekleyip gerçek VPN çıkış testini çalıştırın.'})
+
+
+def diagnostics():
+    command = ("printf '== Sistem ==\\n'; ubus call system board | grep -E 'model|version' | head -n 3; "
+               "printf '\\n== Mod / Xray ==\\n'; cat /etc/happvpn/mode 2>/dev/null || true; "
+               "printf '\\n'; netstat -lnt 2>/dev/null | grep ':1080 ' || true; "
+               "printf '\\n== Son Xray / HappRouter olayları ==\\n'; "
+               "logread 2>/dev/null | grep -E 'daemon\\..*xray|happvpn:' | tail -n 35")
+    output = ssh(command, timeout=25).decode('utf-8', 'replace')[-12000:]
+    output = re.sub(r'https?://[^\s]+', '[adres gizlendi]', output)
+    output = re.sub(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}\b', '[kimlik gizlendi]', output)
+    emit({'ok': True, 'logs': output})
 
 
 def fetch_subscription(url):
@@ -397,13 +457,17 @@ def active_test(emit_result=True):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['status', 'preview', 'test', 'apply', 'expiry',
-                                            'mode-vpn', 'mode-direct'])
+                                            'mode-vpn', 'mode-direct', 'install', 'logs'])
     parser.add_argument('--url')
     parser.add_argument('--expires', type=int)
     args = parser.parse_args()
     try:
         if args.command == 'status':
             status()
+        elif args.command == 'install':
+            install_helpers()
+        elif args.command == 'logs':
+            diagnostics()
         elif args.command in ('preview', 'apply'):
             url = sys.stdin.read().strip() if args.url == '-' else args.url
             if not url:

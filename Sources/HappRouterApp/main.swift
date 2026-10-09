@@ -65,6 +65,7 @@ private struct BackendResult: Decodable {
     let count: Int?
     let nodes: [Node]?
     let note: String?
+    let logs: String?
 }
 
 private enum Backend {
@@ -141,6 +142,7 @@ private final class DashboardModel: ObservableObject {
     @Published var busy = false
     @Published var message = "Router bağlantısı kontrol ediliyor…"
     @Published var exitIP: String?
+    @Published var logs = ""
     @Published var deviceRates: [String: Double] = [:]
     @Published var expiration = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 6)) ?? Date()
     private var refreshing = false
@@ -185,6 +187,7 @@ private final class DashboardModel: ObservableObject {
 
     func test() {
         busy = true
+        exitIP = nil
         message = "VPN çıkış adresi test ediliyor…"
         Task {
             defer { busy = false }
@@ -194,8 +197,41 @@ private final class DashboardModel: ObservableObject {
                 if result.ok {
                     exitIP = result.exitIP
                     message = "VPN bağlantısı başarılı"
-                } else { message = result.error ?? "Test başarısız" }
-            } catch { message = error.localizedDescription }
+                } else {
+                    message = result.error ?? "Test başarısız"
+                    loadLogs()
+                }
+            } catch {
+                message = error.localizedDescription
+                loadLogs()
+            }
+        }
+    }
+
+    func install() {
+        busy = true
+        message = "Router yardımcıları kuruluyor…"
+        Task {
+            defer { busy = false }
+            do {
+                let data = try await Task.detached(priority: .utility) { try Backend.run("install") }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                message = result.note ?? result.error ?? "Kurulum tamamlanamadı"
+                if result.ok { refresh() } else { loadLogs() }
+            } catch {
+                message = error.localizedDescription
+                loadLogs()
+            }
+        }
+    }
+
+    func loadLogs() {
+        Task {
+            do {
+                let data = try await Task.detached(priority: .utility) { try Backend.run("logs") }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                logs = result.logs ?? result.error ?? "Günlük bulunamadı"
+            } catch { logs = error.localizedDescription }
         }
     }
 
@@ -458,6 +494,7 @@ private struct ContentView: View {
             }
             subscriptionSection
             sectionPanel { nodeSection }
+            diagnosticsSection
             feedbackLine
         }
     }
@@ -487,6 +524,16 @@ private struct ContentView: View {
             }
             sectionPanel {
                 VStack(alignment: .leading, spacing: 12) {
+                    Text("Router kurulumu").font(AppFont.bold(18))
+                    Text("Mac'i router LAN portuna bağla. Kurulum, mevcut OpenWrt ve Xray üzerinde ölçüm, kullanım ve abonelik süresi görevlerini yükler. VPN ayarlarını değiştirmez.")
+                        .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                    Button("Gerekli yardımcıları yükle") { model.install() }
+                        .disabled(model.busy)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            sectionPanel {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("İnternet paylaşım modu").font(AppFont.bold(18))
                     Text("VPN modunda bağlı cihazlar Happ üzerinden çıkar. Normal internet modunda router WAN bağlantısını paylaşır.")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
@@ -499,6 +546,29 @@ private struct ContentView: View {
                 }
             }
             feedbackLine
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        sectionPanel {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Bağlantı günlükleri").font(AppFont.bold(18))
+                    Spacer()
+                    Button("Günlükleri yenile") { model.loadLogs() }
+                }
+                Text("Test başarısız olduğunda router'ın son Xray olayları burada görünür.")
+                    .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                if !model.logs.isEmpty {
+                    ScrollView([.horizontal, .vertical]) {
+                        Text(model.logs)
+                            .font(AppFont.regular(11))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 220)
+                }
+            }
         }
     }
 
@@ -569,6 +639,8 @@ private struct ContentView: View {
             }
             Label(activeRouteLabel, systemImage: "info.circle")
                 .font(AppFont.regular(12)).foregroundStyle(.secondary)
+            Text("Bu ms değeri yalnızca sunucunun TCP erişimini ölçer. Gerçek VPN bağlantısı için çıkış IP testinin başarılı olması gerekir. Otomatik sunucu değişimi şu anda etkin değil.")
+                .font(AppFont.regular(11)).foregroundStyle(.secondary)
             let nodes = model.status?.nodes ?? model.previewNodes
             if nodes.isEmpty {
                 Text("Henüz sunucu listesi kurulmadı.")

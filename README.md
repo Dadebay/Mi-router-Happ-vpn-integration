@@ -11,6 +11,9 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt ve Xray için macOS kontrol paneli.
 - Abonelik bitiş tarihi ve süre dolunca doğrudan internete geçiş görevi
 - Genel Bakış, VPN Ayarları, Router ve Cihazlar için ayrı gezinme sayfaları
 - Router sayfasından VPN/doğrudan internet modu arasında elle geçiş
+- Router sayfasında mevcut OpenWrt/Xray kurulumunun yardımcı dosyalarını ve zamanlayıcılarını tek düğmeyle yükleme; VPN sayfasında test hatası ve Xray günlüklerini görüntüleme
+
+**Kurulum düğmesinin kapsamı:** Mac ile LAN üzerinden erişilen, SSH anahtarı tanıtılmış Xiaomi 4C üzerinde mevcut OpenWrt/Xray temelini denetler; yardımcı betikleri ve cron görevlerini yeniden yükler. İlk firmware kurulumu, SSH anahtarı tanıtma ve Xray çekirdeğini flash belleğe yerleştirme bu düğmenin kapsamı dışındadır. Eksik ön koşullar uygulamada açık hata olarak gösterilir. Kurulum sırasında mevcut abonelik, Xray yapılandırması ve internet modu korunur.
 - Cihazlar sayfasında Wi-Fi cihazı başına indirme hızı ve bugün indirilen veri
 
 **9 Ekim 2026 canlı durum:** Router normal internet modunda. Mevcut aboneliğin VLESS profili Mac'te, router'ın WAN bağlantısı üzerinden doğrulandı; router'ın kendi Xray işleminde gerçek web isteği zaman aşımına uğruyor. Uygulama VPN çıkışını test etmeden VPN moduna geçmez. Telefonda VPN henüz çalışıyor olarak doğrulanmadı.
