@@ -13,6 +13,8 @@
 
 ## Kalan doğrulama
 
+9 Ekim 2026 canlı tanı: Router WAN üzerinden VLESS sunucusuna TCP, TLS 1.2 ve WebSocket 101 el sıkışmaları başarılı. Aynı abonelik profili Mac Xray ile doğrudan gerçek çıkış IP'si veriyor. Router üzerindeki 25.1.30 MIPSLE Xray çekirdeği geçici yalnızca SOCKS + freedom yapılandırmasında bile dört dakika içinde dinleme portu açamadı; `top` ölçümünde %97 sistem CPU kullanımı ve yaklaşık 6 yük ortalaması görüldü. Takılan Xray işlemi durdurulduktan sonra CPU %100 boşta kaldı. Router `direct` modda normal WAN paylaşımına devam ediyor. Bu nedenle mevcut Xray ile VPN modu ve otomatik sunucu geçişi etkinleştirilmemelidir. Çalışan ve ölçülmüş daha hafif bir router istemcisi veya farklı donanım gerekir.
+
 1. Router'da seçili VLESS profiliyle gerçek çıkış IP'sini doğrula. Mac üzerinde aynı profil ve router WAN yolu başarıyla test edildi; router Xray, varsayılan TLS ve TLS 1.2 ile 60 saniyelik HTTPS ve 120 saniyelik HTTP denemelerinde zaman aşımına uğradı.
 2. Otomatik en düşük gecikme geçişini yalnızca başarılı VPN trafik testi sonrasında etkinleştir.
 3. Xray yeniden başlatması için eklenen hazır olma kontrolü ve otomatik geri almayı gerçek abonelik yenilemesinde doğrula.
