@@ -24,7 +24,6 @@ HOME = Path.home() / '.happ-router'
 HOST = '192.168.1.1'
 SSH_KEY = HOME / 'router_rsa'
 KNOWN_HOSTS = HOME / 'known_hosts'
-PROBE_URL = 'https://www.gstatic.com/generate_204'
 
 
 def setup():
@@ -114,32 +113,22 @@ def parse_subscription(text):
     return nodes, outbounds
 
 
-def build_config(base, outbounds):
+def build_config(base, outbound):
     fallback = next((item for item in base.get('outbounds', []) if item.get('tag') == 'happ-vpn'), None)
     if not fallback:
-        raise ValueError('Çalışan Happ VPN yedek profili bulunamadı; mevcut bağlantı korunuyor.')
+        raise ValueError('Happ VPN yedek profili bulunamadı; mevcut bağlantı korunuyor.')
     config = dict(base)
     config['inbounds'] = [item for item in base.get('inbounds', [])
-                          if item.get('tag') != 'metrics-in'] + [
-        {'tag': 'metrics-in', 'listen': '127.0.0.1', 'port': 11111,
-         'protocol': 'dokodemo-door',
-         'settings': {'address': '127.0.0.1', 'port': 11111, 'network': 'tcp'}}]
-    config['outbounds'] = [fallback] + outbounds
-    config['observatory'] = {'subjectSelector': ['node-'], 'probeUrl': PROBE_URL,
-                             'probeInterval': '2m', 'enableConcurrency': False}
+                          if item.get('tag') in ('socks', 'tproxy', 'dns-in')]
+    config['outbounds'] = [outbound, fallback]
     config['routing'] = {
         'domainStrategy': 'AsIs',
-        'balancers': [{'tag': 'best', 'selector': ['node-'],
-                       'fallbackTag': 'happ-vpn', 'strategy': {'type': 'leastPing'}}],
         'rules': [
-            {'type': 'field', 'inboundTag': ['metrics-in'], 'outboundTag': 'Metrics'},
             {'type': 'field', 'inboundTag': ['socks', 'tproxy', 'dns-in'],
-             'outboundTag': 'happ-vpn'}],
+             'outboundTag': outbound['tag']}],
     }
-    config['metrics'] = {'tag': 'Metrics'}
-    config['stats'] = {}
-    config['policy'] = {'system': {'statsInboundUplink': True, 'statsInboundDownlink': True,
-                                   'statsOutboundUplink': True, 'statsOutboundDownlink': True}}
+    for key in ('observatory', 'metrics', 'stats', 'policy'):
+        config.pop(key, None)
     config['log'] = {'loglevel': 'warning'}
     return config
 
@@ -156,7 +145,10 @@ def install_subscription(url, expires_at):
         raise ValueError('Gelecekteki abonelik bitiş tarihini seçin.')
     nodes, outbounds = parse_subscription(fetch_subscription(url))
     base = json.loads(ssh('cat /etc/xray/config.json').decode('utf-8'))
-    candidate = build_config(base, outbounds)
+    # Xray observatory with every profile exhausts this router's 64 MB RAM.
+    # Install one profile; the separate lightweight probe keeps the full list visible.
+    chosen = outbounds[0]
+    candidate = build_config(base, chosen)
     validator = Path(__file__).parent / 'xray-validator'
     if not validator.exists():
         validator = Path(__file__).parent.parent / 'Tools' / 'xray-validator'
@@ -203,6 +195,7 @@ def install_subscription(url, expires_at):
             'chmod 600 /etc/happvpn/nodes.json && '
             'cp /tmp/happvpn-probes.tsv /etc/happvpn/probes.tsv && '
             'chmod 600 /etc/happvpn/probes.tsv && '
+            f"printf {chosen['tag']} > /etc/happvpn/active-outbound && "
             'cp /tmp/happvpn-subscription-url /etc/happvpn/subscription-url && '
             'chmod 600 /etc/happvpn/subscription-url && '
             'cp /tmp/happvpn-expires-at /etc/happvpn/expires-at && '
@@ -220,10 +213,10 @@ def install_subscription(url, expires_at):
 
 
 def status():
-    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; wget -T 3 -qO- http://127.0.0.1:11111/debug/vars 2>/dev/null; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; netstat -lnt | grep -q ':1080 ' && echo ready || echo starting; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
+    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; wget -T 3 -qO- http://127.0.0.1:11111/debug/vars 2>/dev/null; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; netstat -lnt | grep -q ':1080 ' && echo ready || echo starting; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
     raw = ssh(command, timeout=35).decode('utf-8', 'replace')
     sections = {}
-    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|PROBES|METRICS|NODES|SYSTEM)__\n', raw)
+    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|PROBES|METRICS|NODES|ACTIVE|SYSTEM)__\n', raw)
     for index in range(1, len(pieces) - 1, 2):
         sections[pieces[index]] = pieces[index + 1].strip()
     netdev = {}
@@ -303,13 +296,15 @@ def status():
     expires_at = int(expiry_match.group(1)) if expiry_match else 0
     mode_match = re.search(r'(vpn|direct)\s*$', tail)
     mode = mode_match.group(1) if mode_match else 'vpn'
+    active_outbound = sections.get('ACTIVE', '').strip() or 'happ-vpn'
     emit({'ok': True, 'vpnRunning': len(system) >= 2 and system[1].strip() == 'ready',
           'uptimeSeconds': float(system[0].split()[0]) if system else 0,
           'wifi': netdev.get('phy0-ap0', {}), 'wan': netdev.get('eth0.2', {}),
           'vpnBytes': vpn_bytes, 'devices': devices, 'nodes': nodes,
           'wifiDownloadToday': sum(item['downloadToday'] for item in usage.values()),
           'best': best['tag'] if best else 'happ-vpn',
-          'fallback': True, 'metricsAvailable': bool(metrics),
+          'fallback': active_outbound == 'happ-vpn',
+          'activeOutbound': active_outbound, 'metricsAvailable': bool(metrics),
           'expiresAt': expires_at,
           'mode': mode,
           'updatedAt': int(time.time())})

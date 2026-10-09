@@ -13,13 +13,13 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt ve Xray için macOS kontrol paneli.
 - Router sayfasından VPN/doğrudan internet modu arasında elle geçiş
 - Cihazlar sayfasında Wi-Fi cihazı başına indirme hızı ve bugün indirilen veri
 
-VLESS WebSocket/TLS adayları için hafif TCP erişim testi 30 dakikada bir çalışır. Bu ölçüm VPN kimlik doğrulamasını veya gerçek çıkış hızını kanıtlamaz. Otomatik sunucu seçimi üzerinde çalışılıyor. Şu anda kullanıcı trafiği çalışan Happ Shadowsocks profiline sabitlenmiştir; adaylar canlı trafiği değiştirmez. `n/a`, TCP bağlantısının kurulamadığını veya ölçümün bulunmadığını gösterir. Ülke bayrakları sağlayıcının etiketidir, fiziksel konum kanıtı değildir.
+VLESS WebSocket/TLS adayları için hafif TCP erişim testi 30 dakikada bir çalışır. Bu ölçüm VPN kimlik doğrulamasını veya gerçek çıkış hızını kanıtlamaz. Otomatik sunucu seçimi üzerinde çalışılıyor. Router'ın 64 MB belleğine sığması için aynı anda yalnızca bir VLESS sunucusu Xray'e yüklenir; listedeki diğer sunucuların TCP gecikmesi görünür, fakat trafik onlara otomatik geçmez. `n/a`, TCP bağlantısının kurulamadığını veya ölçümün bulunmadığını gösterir. Ülke bayrakları sağlayıcının etiketidir, fiziksel konum kanıtı değildir.
 
 ## Kullanım
 
 Uygulama router'a `192.168.1.1` adresinden SSH ile bağlanır. Yerel SSH anahtarını `~/.happ-router` altında kullanır. Mac'in Wi-Fi ayarlarını değiştirmez. Router'daki VPN ve süre dolumu görevi Mac kapalıyken çalışır.
 
-Yeni abonelik için önce **Profilleri kontrol et**, ardından **Router'a kur** düğmelerini kullan. Kurulum önce Xray JSON'unu doğrular ve mevcut yapılandırmayı yedekler. Router yeniden başlatması 10 dakikayı aşabilir. Kurulum, VPN çıkışını doğrulayamazsa önceki yapılandırmaya döner ve router doğrudan internet modunda kalır. Sunucular arasında otomatik geçiş henüz tamamlanmadı.
+Yeni abonelik için önce **Profilleri kontrol et**, ardından **Router'a kur** düğmelerini kullan. Kurulum listedeki ilk VLESS sunucusunu seçer, Xray JSON'unu doğrular ve mevcut yapılandırmayı yedekler. Router yeniden başlatması 10 dakikayı aşabilir. Kurulum, VPN çıkışını doğrulayamazsa önceki yapılandırmaya döner ve router doğrudan internet modunda kalır. Sunucular arasında otomatik geçiş henüz tamamlanmadı.
 
 ## Geliştirme
 

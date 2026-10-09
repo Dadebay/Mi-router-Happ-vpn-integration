@@ -51,6 +51,7 @@ private struct RouterStatus: Decodable {
     let nodes: [Node]
     let best: String
     let fallback: Bool
+    let activeOutbound: String
     let metricsAvailable: Bool
     let expiresAt: Int
     let mode: String
@@ -348,6 +349,7 @@ private struct ContentView: View {
                 Section("HAPPROUTER") {
                     ForEach(AppPage.allCases) { page in
                         Label(page.title, systemImage: page.symbol)
+                            .font(AppFont.medium(13))
                             .tag(page)
                             .padding(.vertical, 5)
                     }
@@ -548,6 +550,15 @@ private struct ContentView: View {
         return seconds >= 86400 ? "\(seconds / 86400) gün" : "\(seconds / 3600) saat"
     }
 
+    private var activeRouteLabel: String {
+        guard model.status?.mode != "direct" else { return "Normal internet modu açık" }
+        guard let active = model.status?.activeOutbound, active != "happ-vpn" else {
+            return "Trafik Happ profili üzerinden yönleniyor"
+        }
+        let name = model.status?.nodes.first(where: { $0.tag == active })?.name ?? active
+        return "Aktif VPN sunucusu: \(name)"
+    }
+
     private var nodeSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -556,8 +567,7 @@ private struct ContentView: View {
                 Text("TCP erişimi · 30 dakikada bir")
                     .font(AppFont.regular(12)).foregroundStyle(.secondary)
             }
-            Label(model.status?.mode == "direct" ? "Normal internet modu açık" :
-                  "Trafik şu anda Happ profili üzerinden yönleniyor", systemImage: "info.circle")
+            Label(activeRouteLabel, systemImage: "info.circle")
                 .font(AppFont.regular(12)).foregroundStyle(.secondary)
             let nodes = model.status?.nodes ?? model.previewNodes
             if nodes.isEmpty {
@@ -569,7 +579,7 @@ private struct ContentView: View {
                         Text(node.name).lineLimit(1)
                         Spacer()
                         if model.status?.best == node.tag && node.alive == true {
-                            Text("En düşük TCP").font(.caption.bold()).foregroundStyle(.green)
+                            Text("En düşük TCP").font(AppFont.bold(11)).foregroundStyle(.green)
                         }
                         Text(node.alive == true ? "\(Int(node.delay ?? 0)) ms" : "n/a")
                             .monospacedDigit()
@@ -592,9 +602,14 @@ private struct ContentView: View {
                     .font(AppFont.regular(12)).foregroundStyle(.secondary)
             }
             if model.status?.devices.isEmpty != false {
-                ContentUnavailableView("Cihaz görünmüyor", systemImage: "wifi.exclamationmark",
-                                       description: Text("Telefon veya bilgisayar HappVPN ağına bağlandığında burada görünür."))
-                    .frame(maxWidth: .infinity)
+                VStack(spacing: 8) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.title2).foregroundStyle(.secondary)
+                    Text("Cihaz görünmüyor").font(AppFont.semiBold(14))
+                    Text("Telefon veya bilgisayar HappVPN ağına bağlandığında burada görünür.")
+                        .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 22)
             }
             ForEach(model.status?.devices ?? []) { device in
                 HStack(spacing: 12) {
