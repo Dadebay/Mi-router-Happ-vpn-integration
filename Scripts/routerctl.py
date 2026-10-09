@@ -91,11 +91,12 @@ def parse_subscription(text):
             continue
         tag = f'node-{len(nodes):02d}'
         name = urllib.parse.unquote(uri.fragment) or tag
-        tls = {'serverName': first('sni', uri.hostname), 'allowInsecure': False}
+        tls = {'serverName': first('sni', uri.hostname), 'allowInsecure': False,
+               'maxVersion': '1.2'}
         if first('alpn'):
             tls['alpn'] = first('alpn').split(',')
-        # This MIPS router stalls during the uTLS fingerprint handshake.
-        # The provider's WS/TLS endpoint was verified with native TLS.
+        # This MIPS router stalls on modern TLS handshakes. The provider's
+        # WS/TLS endpoint was verified with TLS 1.2 and no uTLS fingerprint.
         ws = {'path': first('path', '/')}
         if first('host'):
             ws['headers'] = {'Host': first('host')}
