@@ -94,8 +94,8 @@ def parse_subscription(text):
         tls = {'serverName': first('sni', uri.hostname), 'allowInsecure': False}
         if first('alpn'):
             tls['alpn'] = first('alpn').split(',')
-        if first('fp'):
-            tls['fingerprint'] = first('fp')
+        # This MIPS router stalls during the uTLS fingerprint handshake.
+        # The provider's WS/TLS endpoint was verified with native TLS.
         ws = {'path': first('path', '/')}
         if first('host'):
             ws['headers'] = {'Host': first('host')}
@@ -177,9 +177,11 @@ def install_subscription(url, expires_at):
         ssh('cp /etc/xray/config.json /etc/xray/config.json.last-good && '
             'cp /tmp/happvpn-candidate.json /etc/xray/config.json && '
             'chmod 600 /etc/xray/config.json && /etc/init.d/xray restart', timeout=45)
-        deadline = time.monotonic() + 15 * 60
+        deadline = time.monotonic() + 30 * 60
         last_error = None
+        failed_tests = 0
         while time.monotonic() < deadline:
+            ready = 'starting'
             try:
                 ready = ssh("netstat -lnt | grep -q ':1080 ' && echo ready || echo starting",
                             timeout=25).decode('ascii', 'replace').strip()
@@ -188,9 +190,13 @@ def install_subscription(url, expires_at):
                     break
             except Exception as exc:
                 last_error = exc
-            time.sleep(12)
+                if ready == 'ready':
+                    failed_tests += 1
+                    if failed_tests >= 3:
+                        raise RuntimeError('Yeni VPN çıkışı üç denemede doğrulanamadı.') from exc
+            time.sleep(20)
         else:
-            raise RuntimeError('Yeni VPN 15 dakika içinde doğrulanamadı.') from last_error
+            raise RuntimeError('Yeni VPN 30 dakika içinde doğrulanamadı.') from last_error
         ssh('cp /tmp/happvpn-nodes.json /etc/happvpn/nodes.json && '
             'chmod 600 /etc/happvpn/nodes.json && '
             'cp /tmp/happvpn-probes.tsv /etc/happvpn/probes.tsv && '
@@ -352,7 +358,8 @@ def active_test(emit_result=True):
                 if time.monotonic() > deadline:
                     raise RuntimeError('SSH tüneli zaman aşımına uğradı.')
                 time.sleep(0.5)
-        s.settimeout(12)
+        # TLS on the 64 MB MIPS router can need longer while Xray settles.
+        s.settimeout(60)
         s.sendall(b'\x05\x01\x00')
         if s.recv(2) != b'\x05\x00':
             raise RuntimeError('Router SOCKS bağlantısı kurulamadı.')

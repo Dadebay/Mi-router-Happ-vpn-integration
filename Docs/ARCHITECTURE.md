@@ -2,8 +2,8 @@
 
 - **macOS uygulaması:** SwiftUI; router durumunu SSH üzerinden okur. URL Keychain'de saklanır.
 - **Controller:** `Scripts/routerctl.py`; VLESS WebSocket/TLS aboneliğini ayrıştırır, Xray yapılandırmasını üretir ve doğrular.
-- **Router:** OpenWrt 24.10.5, Xray 25.1.30. `observatory` ve `leastPing` adaylar için hazırlanmıştır. Canlı trafik doğrulama tamamlanana kadar `happ-vpn` Shadowsocks profiline sabittir.
-- **Durum:** Xray Metrics için okuma kodu hazırdır; çok sayıda adayın router işlemcisinde oluşturduğu yük nedeniyle izleme şu anda devre dışıdır. Cihazlar DHCP ve Wi-Fi istasyonlarından çıkarılır.
+- **Router:** OpenWrt 24.10.5, Xray 25.1.30. Aynı anda yalnızca bir VLESS profili ve eski Shadowsocks yedeği yüklenir. Xray'in çok sayıda profili eşzamanlı izlemesi 64 MB cihazı aşırı yüklediğinden etkin değildir.
+- **Durum:** Cihazlar DHCP ve Wi-Fi istasyonlarından çıkarılır. Xray Metrics şu an etkin değildir; arayüzdeki sunucu gecikmeleri ayrı bir TCP probundan gelir.
 - **Süre dolumu:** `expiry-check.sh` cron ile çalışır; `mode.sh` doğrudan internet moduna geçirir. Uçtan uca geçiş testi bekliyor.
 - **Gezinme:** Genel Bakış özet sunar; VPN Ayarları test/sunucu/abonelik işlemlerini, Router trafik ve paylaşım modunu, Cihazlar bağlı istemcileri gösterir.
 - **Cihaz kullanımı:** `usage-sample.lua`, Wi-Fi istasyon sayaçlarını dakikada bir biriktirir. Ashgabat gününe göre toplam `/tmp/happvpn` içinde tutulur ve saatte bir kalıcı depoya yazılır. Uygulama ardışık okumaların farkından KB/sn hesaplar.
@@ -12,8 +12,7 @@
 
 ## Kalan doğrulama
 
-1. Router işlemci ve bellek sınırına uygun daha küçük aday grubuyla Metrics ölçümünü doğrula.
-2. Çalışan adaylara router WAN üzerinden erişilebilirliği test et.
-3. Otomatik en düşük gecikme geçişini yalnızca başarılı trafik testi sonrasında etkinleştir.
-4. Xray yeniden başlatması için eklenen hazır olma kontrolü ve otomatik geri almayı gerçek abonelik yenilemesinde doğrula.
-5. Abonelik süresi dolunca doğrudan internete geçişi ve telefon trafiğini test et.
+1. Router'da seçili VLESS profiliyle gerçek çıkış IP'sini doğrula. Mac üzerinde aynı profil ve router WAN yolu başarıyla test edildi; router Xray el sıkışması ayrıca sınanıyor.
+2. Otomatik en düşük gecikme geçişini yalnızca başarılı VPN trafik testi sonrasında etkinleştir.
+3. Xray yeniden başlatması için eklenen hazır olma kontrolü ve otomatik geri almayı gerçek abonelik yenilemesinde doğrula.
+4. Abonelik süresi dolunca doğrudan internete geçişi ve telefon trafiğini test et.

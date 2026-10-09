@@ -19,7 +19,7 @@ VLESS WebSocket/TLS adayları için hafif TCP erişim testi 30 dakikada bir çal
 
 Uygulama router'a `192.168.1.1` adresinden SSH ile bağlanır. Yerel SSH anahtarını `~/.happ-router` altında kullanır. Mac'in Wi-Fi ayarlarını değiştirmez. Router'daki VPN ve süre dolumu görevi Mac kapalıyken çalışır.
 
-Yeni abonelik için önce **Profilleri kontrol et**, ardından **Router'a kur** düğmelerini kullan. Kurulum listedeki ilk VLESS sunucusunu seçer, Xray JSON'unu doğrular ve mevcut yapılandırmayı yedekler. Router yeniden başlatması 10 dakikayı aşabilir. Kurulum, VPN çıkışını doğrulayamazsa önceki yapılandırmaya döner ve router doğrudan internet modunda kalır. Sunucular arasında otomatik geçiş henüz tamamlanmadı.
+Yeni abonelik için önce **Profilleri kontrol et**, ardından **Router'a kur** düğmelerini kullan. Kurulum listedeki ilk VLESS sunucusunu seçer, Xray JSON'unu doğrular ve mevcut yapılandırmayı yedekler. Bu router'da Xray açılışı yaklaşık 20 dakika sürebilir. Kurulum, VPN çıkışını doğrulayamazsa önceki yapılandırmaya döner ve router doğrudan internet modunda kalır. Sunucular arasında otomatik geçiş henüz tamamlanmadı.
 
 ## Geliştirme
 
