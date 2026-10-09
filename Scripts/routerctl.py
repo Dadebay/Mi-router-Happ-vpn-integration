@@ -320,6 +320,11 @@ def set_expiry(expires_at):
 def set_mode(mode):
     if mode not in ('vpn', 'direct'):
         raise ValueError('Geçersiz internet modu.')
+    if mode == 'vpn':
+        expires_at = int(ssh('cat /etc/happvpn/expires-at').decode('ascii').strip())
+        if int(time.time()) >= expires_at:
+            raise ValueError('Abonelik süresi dolmuş. Yeni bitiş tarihini kaydedin.')
+        active_test(emit_result=False)
     ssh(f'/etc/happvpn/mode.sh {mode}', timeout=45)
     emit({'ok': True, 'note': 'Router internet modu değiştirildi.', 'mode': mode})
 
