@@ -20,7 +20,7 @@ case "${1:-}" in
     /etc/init.d/firewall reload
     /etc/init.d/dnsmasq restart
     printf direct > "$MODE_FILE"
-    logger -t happvpn 'subscription expired: direct WAN sharing enabled'
+    logger -t happvpn 'direct WAN sharing enabled'
     ;;
   vpn)
     [ "$(cat "$MODE_FILE" 2>/dev/null || true)" = vpn ] && exit 0

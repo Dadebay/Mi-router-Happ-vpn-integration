@@ -12,7 +12,7 @@
 
 ## Kalan doğrulama
 
-1. Router'da seçili VLESS profiliyle gerçek çıkış IP'sini doğrula. Mac üzerinde aynı profil ve router WAN yolu başarıyla test edildi; router Xray el sıkışması ayrıca sınanıyor.
+1. Router'da seçili VLESS profiliyle gerçek çıkış IP'sini doğrula. Mac üzerinde aynı profil ve router WAN yolu başarıyla test edildi; router Xray, varsayılan TLS ve TLS 1.2 ile 60 saniyelik HTTPS ve 120 saniyelik HTTP denemelerinde zaman aşımına uğradı.
 2. Otomatik en düşük gecikme geçişini yalnızca başarılı VPN trafik testi sonrasında etkinleştir.
 3. Xray yeniden başlatması için eklenen hazır olma kontrolü ve otomatik geri almayı gerçek abonelik yenilemesinde doğrula.
 4. Abonelik süresi dolunca doğrudan internete geçişi ve telefon trafiğini test et.

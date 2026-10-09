@@ -13,6 +13,8 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt ve Xray için macOS kontrol paneli.
 - Router sayfasından VPN/doğrudan internet modu arasında elle geçiş
 - Cihazlar sayfasında Wi-Fi cihazı başına indirme hızı ve bugün indirilen veri
 
+**9 Ekim 2026 canlı durum:** Router normal internet modunda. Mevcut aboneliğin VLESS profili Mac'te, router'ın WAN bağlantısı üzerinden doğrulandı; router'ın kendi Xray işleminde gerçek web isteği zaman aşımına uğruyor. Uygulama VPN çıkışını test etmeden VPN moduna geçmez. Telefonda VPN henüz çalışıyor olarak doğrulanmadı.
+
 VLESS WebSocket/TLS adayları için hafif TCP erişim testi 30 dakikada bir çalışır. Bu ölçüm VPN kimlik doğrulamasını veya gerçek çıkış hızını kanıtlamaz. Otomatik sunucu seçimi üzerinde çalışılıyor. Router'ın 64 MB belleğine sığması için aynı anda yalnızca bir VLESS sunucusu Xray'e yüklenir; listedeki diğer sunucuların TCP gecikmesi görünür, fakat trafik onlara otomatik geçmez. `n/a`, TCP bağlantısının kurulamadığını veya ölçümün bulunmadığını gösterir. Ülke bayrakları sağlayıcının etiketidir, fiziksel konum kanıtı değildir.
 
 ## Kullanım

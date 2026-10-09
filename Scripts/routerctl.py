@@ -384,6 +384,8 @@ def active_test(emit_result=True):
         if emit_result:
             emit({'ok': True, 'exitIP': body})
         return body
+    except TimeoutError as exc:
+        raise RuntimeError('Router üzerindeki VPN 60 saniyede yanıt vermedi.') from exc
     finally:
         proc.terminate()
         try:
