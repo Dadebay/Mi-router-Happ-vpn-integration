@@ -14,7 +14,8 @@ cp Scripts/routerctl.py "$APP/Contents/Resources/routerctl.py"
 if [ -x "$VALIDATOR" ]; then
   cp "$VALIDATOR" "$APP/Contents/Resources/xray-validator"
 fi
-for name in Gilroy-Regular.ttf Gilroy-Medium.ttf Gilroy-SemiBold.ttf Gilroy-Bold.ttf Gilroy-Extrabold.ttf QurovaDEMO-Medium.otf; do
+rm -f "$APP/Contents/Resources/Fonts/QurovaDEMO-Medium.otf"
+for name in Gilroy-Regular.ttf Gilroy-Medium.ttf Gilroy-SemiBold.ttf Gilroy-Bold.ttf Gilroy-Extrabold.ttf; do
   if [ -f "$FONTS/$name" ]; then
     cp "$FONTS/$name" "$APP/Contents/Resources/Fonts/$name"
   fi

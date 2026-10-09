@@ -107,7 +107,7 @@ def parse_subscription(text):
             'streamSettings': {'network': 'ws', 'security': 'tls',
                                'tlsSettings': tls, 'wsSettings': ws},
         })
-        nodes.append({'tag': tag, 'name': name, 'address': uri.hostname,
+        nodes.append({'tag': tag, 'name': name, 'address': uri.hostname, 'port': uri.port,
                       'country': name[:2] if name[:1] in ('🇹', '🇪', '🇵', '🇫', '🇷') else ''})
     if not nodes:
         raise ValueError('Desteklenen VLESS WebSocket/TLS profili bulunamadı.')
@@ -174,24 +174,56 @@ def install_subscription(url, expires_at):
         stdin=json.dumps(candidate, ensure_ascii=False).encode('utf-8'))
     ssh('umask 077; cat > /tmp/happvpn-nodes.json',
         stdin=json.dumps(nodes, ensure_ascii=False).encode('utf-8'))
+    probes = ''.join(f"{node['tag']}\t{node['address']}\t{node['port']}\n"
+                     for node in nodes)
+    ssh('umask 077; cat > /tmp/happvpn-probes.tsv', stdin=probes.encode('utf-8'))
     ssh('umask 077; cat > /tmp/happvpn-subscription-url', stdin=url.encode('utf-8'))
     ssh('umask 077; cat > /tmp/happvpn-expires-at', stdin=str(expires_at).encode('ascii'))
-    # The matching macOS Xray build validates without consuming the router's RAM.
-    ssh('cp /etc/xray/config.json /etc/xray/config.json.last-good && '
-        'cp /tmp/happvpn-candidate.json /etc/xray/config.json && chmod 600 /etc/xray/config.json && '
-        'cp /tmp/happvpn-nodes.json /etc/happvpn/nodes.json && chmod 600 /etc/happvpn/nodes.json && '
-        'cp /tmp/happvpn-subscription-url /etc/happvpn/subscription-url && chmod 600 /etc/happvpn/subscription-url && '
-        'cp /tmp/happvpn-expires-at /etc/happvpn/expires-at && chmod 600 /etc/happvpn/expires-at && '
-        '([ ! -x /etc/happvpn/mode.sh ] || /etc/happvpn/mode.sh vpn) && '
-        '/etc/init.d/xray restart', timeout=45)
-    emit({'ok': True, 'count': len(nodes), 'note': 'Abonelik kuruldu; Xray yeniden başlıyor.'})
+    # Keep client internet available while this small router starts Xray.
+    ssh('/etc/happvpn/mode.sh direct', timeout=45)
+    try:
+        ssh('cp /etc/xray/config.json /etc/xray/config.json.last-good && '
+            'cp /tmp/happvpn-candidate.json /etc/xray/config.json && '
+            'chmod 600 /etc/xray/config.json && /etc/init.d/xray restart', timeout=45)
+        deadline = time.monotonic() + 15 * 60
+        last_error = None
+        while time.monotonic() < deadline:
+            try:
+                ready = ssh("netstat -lnt | grep -q ':1080 ' && echo ready || echo starting",
+                            timeout=25).decode('ascii', 'replace').strip()
+                if ready == 'ready':
+                    active_test(emit_result=False)
+                    break
+            except Exception as exc:
+                last_error = exc
+            time.sleep(12)
+        else:
+            raise RuntimeError('Yeni VPN 15 dakika içinde doğrulanamadı.') from last_error
+        ssh('cp /tmp/happvpn-nodes.json /etc/happvpn/nodes.json && '
+            'chmod 600 /etc/happvpn/nodes.json && '
+            'cp /tmp/happvpn-probes.tsv /etc/happvpn/probes.tsv && '
+            'chmod 600 /etc/happvpn/probes.tsv && '
+            'cp /tmp/happvpn-subscription-url /etc/happvpn/subscription-url && '
+            'chmod 600 /etc/happvpn/subscription-url && '
+            'cp /tmp/happvpn-expires-at /etc/happvpn/expires-at && '
+            'chmod 600 /etc/happvpn/expires-at && '
+            '/etc/happvpn/mode.sh vpn', timeout=45)
+    except Exception as exc:
+        try:
+            ssh('cp /etc/xray/config.json.last-good /etc/xray/config.json && '
+                '/etc/init.d/xray restart', timeout=45)
+        except Exception:
+            pass
+        raise RuntimeError('Yeni yapılandırma doğrulanamadı; önceki yapılandırma geri yüklendi. '
+                           'Router doğrudan internet modunda kaldı.') from exc
+    emit({'ok': True, 'count': len(nodes), 'note': 'Abonelik doğrulandı; VPN modu açıldı.'})
 
 
 def status():
-    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__METRICS__\\n'; wget -T 3 -qO- http://127.0.0.1:11111/debug/vars 2>/dev/null; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; netstat -lnt | grep -q ':1080 ' && echo ready || echo starting; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
+    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; wget -T 3 -qO- http://127.0.0.1:11111/debug/vars 2>/dev/null; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; netstat -lnt | grep -q ':1080 ' && echo ready || echo starting; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
     raw = ssh(command, timeout=35).decode('utf-8', 'replace')
     sections = {}
-    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|METRICS|NODES|SYSTEM)__\n', raw)
+    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|PROBES|METRICS|NODES|SYSTEM)__\n', raw)
     for index in range(1, len(pieces) - 1, 2):
         sections[pieces[index]] = pieces[index + 1].strip()
     netdev = {}
@@ -224,6 +256,17 @@ def status():
             mac = match.group(2).lower()
             devices.append({'mac': mac, 'ip': match.group(1), 'type': 'Kablo',
                             'name': lease_by_mac.get(mac, {}).get('name', '')})
+    usage = {}
+    for line in sections.get('USAGE', '').splitlines():
+        columns = line.split('\t')
+        if len(columns) == 4 and re.fullmatch(r'\d{4}-\d{2}-\d{2}', columns[0]):
+            try:
+                usage[columns[1].lower()] = {'uploadToday': int(columns[2]),
+                                             'downloadToday': int(columns[3])}
+            except ValueError:
+                continue
+    for device in devices:
+        device.update(usage.get(device['mac'], {}))
     try:
         metrics = json.loads(sections.get('METRICS') or '{}')
     except json.JSONDecodeError:
@@ -233,8 +276,18 @@ def status():
     except json.JSONDecodeError:
         nodes = []
     observations = metrics.get('observatory', {})
+    tcp_probes = {}
+    for line in sections.get('PROBES', '').splitlines():
+        columns = line.split('\t')
+        if len(columns) == 4 and columns[1] in ('0', '1'):
+            try:
+                tcp_probes[columns[0]] = {'alive': columns[1] == '1',
+                                           'delay': int(columns[2]),
+                                           'last_try_time': int(columns[3])}
+            except ValueError:
+                continue
     for node in nodes:
-        observation = observations.get(node['tag'], {})
+        observation = observations.get(node['tag'], tcp_probes.get(node['tag'], {}))
         node['alive'] = observation.get('alive')
         node['delay'] = observation.get('delay') if observation.get('alive') else None
         node['lastTry'] = observation.get('last_try_time')
@@ -254,8 +307,9 @@ def status():
           'uptimeSeconds': float(system[0].split()[0]) if system else 0,
           'wifi': netdev.get('phy0-ap0', {}), 'wan': netdev.get('eth0.2', {}),
           'vpnBytes': vpn_bytes, 'devices': devices, 'nodes': nodes,
+          'wifiDownloadToday': sum(item['downloadToday'] for item in usage.values()),
           'best': best['tag'] if best else 'happ-vpn',
-          'fallback': best is None, 'metricsAvailable': bool(metrics),
+          'fallback': True, 'metricsAvailable': bool(metrics),
           'expiresAt': expires_at,
           'mode': mode,
           'updatedAt': int(time.time())})
@@ -275,7 +329,7 @@ def set_mode(mode):
     emit({'ok': True, 'note': 'Router internet modu değiştirildi.', 'mode': mode})
 
 
-def active_test():
+def active_test(emit_result=True):
     # A tunnel through the router's SOCKS listener verifies the real VPN exit.
     setup()
     with socket.socket() as reservation:
@@ -319,7 +373,9 @@ def active_test():
         body = bytes(data).split(b'\r\n\r\n', 1)[-1].decode('utf-8', 'replace').strip()
         if not re.fullmatch(r'\d{1,3}(?:\.\d{1,3}){3}', body):
             raise RuntimeError('VPN çıkış IP yanıtı geçersiz.')
-        emit({'ok': True, 'exitIP': body})
+        if emit_result:
+            emit({'ok': True, 'exitIP': body})
+        return body
     finally:
         proc.terminate()
         try:

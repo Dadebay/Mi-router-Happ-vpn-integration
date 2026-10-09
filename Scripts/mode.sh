@@ -5,6 +5,7 @@ MODE_FILE=/etc/happvpn/mode
 NFT_FILE=/etc/nftables.d/happvpn.nft
 NFT_BACKUP=/etc/happvpn/happvpn.nft.vpn
 FORWARDING=firewall.@forwarding[0].enabled
+DNSMASQ=dhcp.@dnsmasq[0]
 
 case "${1:-}" in
   direct)
@@ -13,7 +14,11 @@ case "${1:-}" in
     printf '%s\n' 'chain happvpn_prerouting { type filter hook prerouting priority mangle; policy accept; }' > "$NFT_FILE"
     uci set "$FORWARDING=1"
     uci commit firewall
+    uci set "$DNSMASQ.noresolv=0"
+    uci -q delete "$DNSMASQ.server" || true
+    uci commit dhcp
     /etc/init.d/firewall reload
+    /etc/init.d/dnsmasq restart
     printf direct > "$MODE_FILE"
     logger -t happvpn 'subscription expired: direct WAN sharing enabled'
     ;;
@@ -23,7 +28,11 @@ case "${1:-}" in
     uci set "$FORWARDING=0"
     uci commit firewall
     cp "$NFT_BACKUP" "$NFT_FILE"
+    uci set "$DNSMASQ.noresolv=1"
+    uci set "$DNSMASQ.server=127.0.0.1#5354"
+    uci commit dhcp
     /etc/init.d/firewall reload
+    /etc/init.d/dnsmasq restart
     printf vpn > "$MODE_FILE"
     logger -t happvpn 'VPN-only forwarding enabled'
     ;;

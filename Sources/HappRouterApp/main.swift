@@ -8,7 +8,7 @@ private enum AppFont {
     static func medium(_ size: CGFloat) -> Font { .custom("Gilroy-Medium", size: size) }
     static func semiBold(_ size: CGFloat) -> Font { .custom("Gilroy-SemiBold", size: size) }
     static func bold(_ size: CGFloat) -> Font { .custom("Gilroy-Bold", size: size) }
-    static func display(_ size: CGFloat) -> Font { .custom("QurovaDEMO-Medium", size: size) }
+    static func display(_ size: CGFloat) -> Font { .custom("Gilroy-Extrabold", size: size) }
 }
 
 private struct ByteCounter: Decodable {
@@ -23,6 +23,8 @@ private struct Device: Decodable, Identifiable {
     let type: String?
     let uploaded: Int64?
     let downloaded: Int64?
+    let uploadToday: Int64?
+    let downloadToday: Int64?
     var id: String { mac }
 }
 
@@ -45,6 +47,7 @@ private struct RouterStatus: Decodable {
     let wan: ByteCounter
     let vpnBytes: ByteCounter?
     let devices: [Device]
+    let wifiDownloadToday: Int64
     let nodes: [Node]
     let best: String
     let fallback: Bool
@@ -137,9 +140,11 @@ private final class DashboardModel: ObservableObject {
     @Published var busy = false
     @Published var message = "Router bağlantısı kontrol ediliyor…"
     @Published var exitIP: String?
+    @Published var deviceRates: [String: Double] = [:]
     @Published var expiration = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 6)) ?? Date()
     private var refreshing = false
     private var expiryLoaded = false
+    private var previousDevices: [String: (bytes: Int64, at: Date)] = [:]
 
     var expiryEpoch: Int {
         Int((Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: expiration) ?? expiration).timeIntervalSince1970)
@@ -153,12 +158,23 @@ private final class DashboardModel: ObservableObject {
             do {
                 let data = try await Task.detached(priority: .utility) { try Backend.run("status") }.value
                 let newStatus = try JSONDecoder().decode(RouterStatus.self, from: data)
+                let now = Date()
+                for device in newStatus.devices {
+                    guard let received = device.downloaded else { continue }
+                    if let previous = previousDevices[device.mac] {
+                        let interval = now.timeIntervalSince(previous.at)
+                        if interval > 0 && received >= previous.bytes {
+                            deviceRates[device.mac] = Double(received - previous.bytes) / interval
+                        }
+                    }
+                    previousDevices[device.mac] = (received, now)
+                }
                 status = newStatus
                 if !expiryLoaded && newStatus.expiresAt > 0 {
                     expiration = Date(timeIntervalSince1970: TimeInterval(newStatus.expiresAt))
                     expiryLoaded = true
                 }
-                message = newStatus.mode == "direct" ? "Abonelik bitti; normal internet paylaşılıyor" :
+                message = newStatus.mode == "direct" ? "Normal internet paylaşılıyor" :
                     (newStatus.vpnRunning ? "Router çalışıyor" : "VPN başlatılıyor")
             } catch {
                 message = "Router'a bağlanılamadı: \(String(reflecting: error))"
@@ -267,6 +283,12 @@ private func bytes(_ value: Int64?) -> String {
     return formatter.string(fromByteCount: value)
 }
 
+private func rate(_ value: Double?) -> String {
+    guard let value else { return "Ölçülüyor" }
+    if value >= 1_048_576 { return String(format: "%.1f MB/sn", value / 1_048_576) }
+    return String(format: "%.0f KB/sn", value / 1024)
+}
+
 private struct StatCard: View {
     let title: String
     let value: String
@@ -317,7 +339,7 @@ private enum AppPage: String, CaseIterable, Identifiable {
 private struct ContentView: View {
     @StateObject private var model = DashboardModel()
     @State private var selectedPage: AppPage? = .overview
-    private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
@@ -401,7 +423,7 @@ private struct ContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Bağlantı").font(AppFont.bold(18))
                     Text(model.status?.mode == "direct"
-                         ? "Abonelik süresi doldu; router normal interneti paylaşıyor."
+                         ? "Router şu anda normal interneti paylaşıyor."
                          : "HappVPN ağı router üzerindeki VPN yapılandırmasını kullanıyor.")
                         .foregroundStyle(.secondary)
                     if let exitIP = model.exitIP {
@@ -480,6 +502,12 @@ private struct ContentView: View {
 
     private var devicesPage: some View {
         VStack(alignment: .leading, spacing: 18) {
+            LazyVGrid(columns: columns, spacing: 12) {
+                StatCard(title: "Bugün indirilen", value: bytes(model.status?.wifiDownloadToday),
+                         caption: "Wi-Fi cihazları · bugün", symbol: "arrow.down.circle")
+                StatCard(title: "Şimdi bağlı", value: "\(model.status?.devices.count ?? 0)",
+                         caption: "Wi-Fi ve kablo", symbol: "laptopcomputer.and.iphone")
+            }
             sectionPanel { deviceSection }
             Button("Cihazları yenile") { model.refresh() }.disabled(model.busy)
             feedbackLine
@@ -525,10 +553,11 @@ private struct ContentView: View {
             HStack {
                 Text("VPN sunucuları").font(AppFont.bold(18))
                 Spacer()
-                Text("Otomatik geçiş doğrulanıyor")
+                Text("TCP erişimi · 30 dakikada bir")
                     .font(AppFont.regular(12)).foregroundStyle(.secondary)
             }
-            Label("Trafik şu anda Happ profili üzerinden yönleniyor", systemImage: "info.circle")
+            Label(model.status?.mode == "direct" ? "Normal internet modu açık" :
+                  "Trafik şu anda Happ profili üzerinden yönleniyor", systemImage: "info.circle")
                 .font(AppFont.regular(12)).foregroundStyle(.secondary)
             let nodes = model.status?.nodes ?? model.previewNodes
             if nodes.isEmpty {
@@ -540,7 +569,7 @@ private struct ContentView: View {
                         Text(node.name).lineLimit(1)
                         Spacer()
                         if model.status?.best == node.tag && node.alive == true {
-                            Text("En düşük ms").font(.caption.bold()).foregroundStyle(.green)
+                            Text("En düşük TCP").font(.caption.bold()).foregroundStyle(.green)
                         }
                         Text(node.alive == true ? "\(Int(node.delay ?? 0)) ms" : "n/a")
                             .monospacedDigit()
@@ -579,8 +608,12 @@ private struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(device.type ?? "").font(AppFont.regular(12))
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(device.type == "Wi-Fi" ? "↓ " + rate(model.deviceRates[device.mac]) : "Kablolu")
+                            .font(AppFont.semiBold(12))
+                        Text(device.downloadToday.map { "Bugün " + bytes($0) } ?? "Günlük veri yok")
+                            .font(AppFont.regular(11)).foregroundStyle(.secondary)
+                    }
                 }
                 .padding(.vertical, 6)
                 Divider()
@@ -633,7 +666,7 @@ struct HappRouterApp: App {
     init() {
         if let resourceURL = Bundle.main.resourceURL {
             for file in ["Gilroy-Regular.ttf", "Gilroy-Medium.ttf", "Gilroy-SemiBold.ttf",
-                         "Gilroy-Bold.ttf", "Gilroy-Extrabold.ttf", "QurovaDEMO-Medium.otf"] {
+                         "Gilroy-Bold.ttf", "Gilroy-Extrabold.ttf"] {
                 let url = resourceURL.appendingPathComponent("Fonts").appendingPathComponent(file)
                 CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
             }
