@@ -72,7 +72,10 @@ def install_helpers():
     requirements = ssh("for cmd in xray lua5.3 nft iw uci; do command -v \"$cmd\" >/dev/null || echo \"$cmd\"; done; "
                        "lua5.3 -e 'require(\"socket\")' >/dev/null 2>&1 || echo lua-socket; "
                        "test -s /etc/xray/config.json || echo xray-config; "
-                       "test -s /etc/happvpn/happvpn.nft.vpn || echo vpn-firewall-backup",
+                       "test -s /etc/happvpn/happvpn.nft.vpn || echo vpn-firewall-backup; "
+                       "test -s /etc/nftables.d/happvpn.nft || echo vpn-firewall; "
+                       "test -s /etc/happvpn/dns-relay.lua || echo dns-relay; "
+                       "test -x /etc/init.d/xray || echo xray-service",
                        timeout=20).decode('utf-8').splitlines()
     if requirements:
         raise RuntimeError('Router hazırlığı eksik: ' + ', '.join(requirements) +

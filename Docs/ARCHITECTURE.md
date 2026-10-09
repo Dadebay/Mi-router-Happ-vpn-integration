@@ -8,6 +8,7 @@
 - **Gezinme:** Genel Bakış özet sunar; VPN Ayarları test/sunucu/abonelik işlemlerini, Router trafik ve paylaşım modunu, Cihazlar bağlı istemcileri gösterir.
 - **Cihaz kullanımı:** `usage-sample.lua`, Wi-Fi istasyon sayaçlarını dakikada bir biriktirir. Ashgabat gününe göre toplam `/tmp/happvpn` içinde tutulur ve saatte bir kalıcı depoya yazılır. Uygulama ardışık okumaların farkından KB/sn hesaplar.
 - **Hafif aday ölçümü:** `probe-nodes.lua`, her 30 dakikada 16 TCP uç noktasını sırayla dener. TCP erişimi VLESS oturumunun çalıştığını göstermez; otomatik trafik geçişini tetiklemez.
+- **Kurulum ve hata ayıklama:** macOS uygulamasındaki kurulum düğmesi mevcut OpenWrt/Xray temelini kontrol edip yardımcı betikleri ve cron görevlerini idempotent biçimde yükler. Günlük ekranı son Xray olaylarını gösterir; canlı test gerçek VPN çıkış IP'sini doğrular. Eksik firmware/Xray çekirdeği kurulum düğmesi tarafından yüklenmez.
 - **Güvenlik:** VPN modunda LAN→WAN doğrudan yönlendirme kapalıdır. Özel anahtar ve abonelik dosyaları depoya alınmaz.
 
 ## Kalan doğrulama
