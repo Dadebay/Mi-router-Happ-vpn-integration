@@ -6,6 +6,7 @@ a separate listener before it replaces the saved working configuration.
 """
 import argparse
 import base64
+import ipaddress
 import io
 import json
 import os
@@ -736,8 +737,7 @@ def active_test(emit_result=True, remote_port=1080):
             data.extend(chunk)
         secure.close()
         body = bytes(data).split(b'\r\n\r\n', 1)[-1].decode('utf-8', 'replace').strip()
-        if not re.fullmatch(r'\d{1,3}(?:\.\d{1,3}){3}', body):
-            raise RuntimeError('VPN çıkış IP yanıtı geçersiz.')
+        body = validated_exit_ip(body)
         if emit_result:
             emit({'ok': True, 'exitIP': body})
         return body
@@ -752,6 +752,13 @@ def active_test(emit_result=True, remote_port=1080):
             proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def validated_exit_ip(value):
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError as exc:
+        raise RuntimeError('VPN çıkış IP yanıtı geçersiz.') from exc
 
 
 def main():

@@ -77,6 +77,13 @@ class ServerSelectionTests(unittest.TestCase):
 
 
 class CandidateProbeTests(unittest.TestCase):
+    def test_exit_ip_accepts_ipv4_and_ipv6_but_rejects_non_ip_response(self):
+        self.assertEqual(routerctl.validated_exit_ip('65.109.188.233'), '65.109.188.233')
+        self.assertEqual(routerctl.validated_exit_ip('2a01:4f9:c010:2f23::1'),
+                         '2a01:4f9:c010:2f23::1')
+        with self.assertRaisesRegex(RuntimeError, 'IP yanıtı geçersiz'):
+            routerctl.validated_exit_ip('<html>error</html>')
+
     def test_probe_checks_selected_server_without_changing_live_profile(self):
         with patch.object(routerctl, 'ssh', return_value=b'') as ssh, \
              patch.object(routerctl, 'active_test', return_value='203.0.113.1') as test_exit, \
