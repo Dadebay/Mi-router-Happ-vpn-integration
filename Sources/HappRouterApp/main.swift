@@ -694,26 +694,22 @@ private struct ContentView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        pageHeader
-                        switch page {
-                        case .overview: overviewPage
-                        case .vpn: vpnPage
-                        case .router: routerPage
-                        case .devices: devicesPage
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    pageHeader
+                    switch page {
+                    case .overview: overviewPage
+                    case .vpn: vpnPage
+                    case .router: routerPage
+                    case .devices: devicesPage
                     }
-                    .frame(maxWidth: page == .devices ? 760 : 940, alignment: .leading)
-                    .frame(maxWidth: .infinity,
-                           minHeight: max(0, geometry.size.height - 48),
-                           alignment: page == .devices ? .center : .top)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 24)
                 }
-                .background(Color(nsColor: .windowBackgroundColor))
+                .frame(maxWidth: page == .devices ? 760 : 940, alignment: .leading)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
+            .background(Color(nsColor: .windowBackgroundColor))
             .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
         }
         .frame(minWidth: 960, minHeight: 680)
@@ -760,13 +756,14 @@ private struct ContentView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                Picker("Görünüm", selection: $appearance) {
-                    Text("Sistem").tag("system")
-                    Text("Açık").tag("light")
-                    Text("Koyu").tag("dark")
+                HStack(spacing: 4) {
+                    appearanceButton("system", title: "Sistem", symbol: "display")
+                    appearanceButton("light", title: "Açık", symbol: "sun.max")
+                    appearanceButton("dark", title: "Koyu", symbol: "moon.stars")
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
+                .padding(4)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke))
                 HStack(spacing: 8) {
                     Circle().fill(heroTint).frame(width: 8, height: 8)
                     Text(heroTitle).font(AppFont.medium(12)).lineLimit(1)
@@ -775,6 +772,24 @@ private struct ContentView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
+    }
+
+    private func appearanceButton(_ value: String, title: String, symbol: String) -> some View {
+        let selected = appearance == value
+        return Button { appearance = value } label: {
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
+                Text(title).font(AppFont.semiBold(10))
+            }
+            .foregroundStyle(selected ? Color.white : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 42)
+            .background(selected ? Theme.accent : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 9))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) görünüm")
     }
 
     private var pageHeader: some View {
