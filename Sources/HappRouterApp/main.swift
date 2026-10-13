@@ -438,6 +438,28 @@ private enum Theme {
     static let stroke = Color.primary.opacity(0.08)
 }
 
+private struct AppActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    var tint: Color = Theme.accent
+    var prominent = false
+    var destructive = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppFont.semiBold(12))
+            .foregroundStyle(isEnabled ? (prominent ? Color.white :
+                                          destructive ? tint : Color.primary) : Color.secondary)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 32)
+            .background(isEnabled ? (prominent ? tint : tint.opacity(0.10))
+                                  : Color.secondary.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9)
+                .stroke(isEnabled ? tint.opacity(prominent ? 0 : 0.18) : Theme.stroke))
+            .opacity(configuration.isPressed ? 0.75 : 1)
+    }
+}
+
 /// Başlıklı, açıklamalı kart. Tüm sayfalar aynı görsel dili kullanır.
 private struct Card<Content: View, Accessory: View>: View {
     let title: String?
@@ -495,7 +517,7 @@ private struct StatCard: View {
     var tint: Color = Theme.accent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: symbol)
                     .font(.system(size: 12, weight: .semibold))
@@ -504,15 +526,18 @@ private struct StatCard: View {
                     .background(tint.opacity(0.13), in: Circle())
                 Text(title).font(AppFont.medium(12)).foregroundStyle(.secondary)
             }
+            Spacer(minLength: 8)
             Text(value)
                 .font(AppFont.bold(24))
                 .lineLimit(1).minimumScaleFactor(0.6)
-            if !caption.isEmpty {
-                Text(caption).font(AppFont.regular(11)).foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            Text(caption.isEmpty ? " " : caption)
+                .font(AppFont.regular(11)).foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(height: 14, alignment: .leading)
+                .opacity(caption.isEmpty ? 0 : 1)
+                .accessibilityHidden(caption.isEmpty)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
         .padding(16)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke))
@@ -614,24 +639,24 @@ private struct ModeCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: symbol)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(tint)
-                        .frame(width: 38, height: 38)
-                        .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
-                    Spacer()
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 18))
-                        .foregroundStyle(selected ? tint : Color.secondary.opacity(0.5))
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 40, height: 40)
+                    .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title).font(AppFont.bold(15))
+                    Text(selected ? "Açık" : "Seç")
+                        .font(AppFont.semiBold(11))
+                        .foregroundStyle(selected ? tint : .secondary)
                 }
-                Text(title).font(AppFont.bold(15))
-                Text(selected ? "Açık" : "Seç")
-                    .font(AppFont.semiBold(11))
+                Spacer(minLength: 8)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
                     .foregroundStyle(selected ? tint : .secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
             .padding(16)
             .background(selected ? tint.opacity(0.08) : Theme.card, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14)
@@ -665,14 +690,6 @@ private enum AppPage: String, CaseIterable, Identifiable {
         case .devices: "laptopcomputer.and.iphone"
         }
     }
-    var subtitle: String {
-        switch self {
-        case .overview: "Bağlantının sağlıklı olup olmadığını tek bakışta gör"
-        case .vpn: "Bağlantıyı test et, sunucu değiştir, abonelik süresini takip et"
-        case .router: "İnternet modunu seç, trafik ve kurulum bilgilerini incele"
-        case .devices: "HappVPN ağına bağlı cihazlar ve kullandıkları veri"
-        }
-    }
 }
 
 private struct ContentView: View {
@@ -684,7 +701,6 @@ private struct ContentView: View {
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private let statColumns = [GridItem(.adaptive(minimum: 168), spacing: 12)]
-    private let systemColumns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
 
     private var page: AppPage { selectedPage ?? .overview }
     private var isDirect: Bool { model.status?.mode == "direct" }
@@ -709,6 +725,7 @@ private struct ContentView: View {
                 .padding(.vertical, 24)
                 .frame(maxWidth: .infinity, alignment: .top)
             }
+            .buttonStyle(AppActionButtonStyle())
             .background(Color(nsColor: .windowBackgroundColor))
             .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
         }
@@ -794,12 +811,7 @@ private struct ContentView: View {
 
     private var pageHeader: some View {
         HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(page.title).font(AppFont.display(28))
-                if page != .devices && page != .router {
-                    Text(page.subtitle).font(AppFont.regular(13)).foregroundStyle(.secondary)
-                }
-            }
+            Text(page.title).font(AppFont.display(28))
             Spacer()
             Button {
                 model.refresh()
@@ -894,7 +906,7 @@ private struct ContentView: View {
                     Button { model.test() } label: {
                         Label("Çıkışı test et", systemImage: "checkmark.shield")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AppActionButtonStyle(prominent: true))
                     .disabled(model.busy || !vpnRunning)
                 }
             }
@@ -924,12 +936,12 @@ private struct ContentView: View {
                          caption: daysRemaining == nil ? "Bitiş tarihi ayarlanmadı" : "kaldı",
                          symbol: "calendar", tint: subscriptionTint)
             }
-            Card("Sistem sağlığı", subtitle: "Her şeyin çalıştığını doğrulayan kontroller", symbol: "stethoscope") {
+            Card("Sistem sağlığı", symbol: "stethoscope") {
                 VStack(alignment: .leading, spacing: 12) {
                     healthRows
                 }
             }
-            if !isDirect {
+            if !isDirect && !(model.exitIP == nil && vpnRunning) {
                 Card("Sonraki adım", symbol: "lightbulb") {
                     HStack {
                         Text(nextStepText).font(AppFont.regular(13)).foregroundStyle(.secondary)
@@ -1012,9 +1024,7 @@ private struct ContentView: View {
 
     private var vpnPage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Card("Bağlantı testi",
-                 subtitle: "Router'ın VPN üzerinden gerçekten internete çıkıp çıkmadığını doğrular.",
-                 symbol: "checkmark.shield") {
+            Card("Bağlantı testi", symbol: "checkmark.shield") {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Çıkış IP adresi").font(AppFont.regular(12)).foregroundStyle(.secondary)
@@ -1027,7 +1037,7 @@ private struct ContentView: View {
                     Button { model.test() } label: {
                         Label("VPN bağlantısını test et", systemImage: "play.fill")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AppActionButtonStyle(prominent: true))
                     .disabled(model.busy || !vpnRunning)
                 }
                 if !vpnRunning {
@@ -1051,7 +1061,7 @@ private struct ContentView: View {
     /// Üç adımlı sunucu değiştirme akışı: yapıştır → kontrol et → seç ve kur.
     private var serverChangeCard: some View {
         Card("Sunucuyu değiştir",
-             subtitle: "Happ'taki çalışan sunucuyu router'a taşı. Yeni sunucu önce ayrı bir bağlantıda test edilir; başarısız olursa eskisi korunur.",
+             subtitle: "Yeni sunucu önce test edilir; başarısızsa mevcut bağlantı korunur.",
              symbol: "arrow.triangle.2.circlepath") {
             VStack(alignment: .leading, spacing: 18) {
                 // 1. adım
@@ -1141,7 +1151,7 @@ private struct ContentView: View {
                         Button { model.apply() } label: {
                             Label("Sunucuyu değiştir", systemImage: "arrow.down.to.line")
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(AppActionButtonStyle(prominent: true))
                         .disabled(model.busy || model.previewNodes.isEmpty)
                         if model.previewNodes.isEmpty {
                             Text("Önce 2. adımı tamamla.").font(AppFont.regular(12)).foregroundStyle(.secondary)
@@ -1304,34 +1314,52 @@ private struct ContentView: View {
                 }
             }
             VStack(alignment: .leading, spacing: 10) {
-                Text("Trafik").font(AppFont.bold(16))
-                    .help("Trafik sayaçları router yeniden başladığında sıfırlanır.")
+                HStack {
+                    Text("Trafik").font(AppFont.bold(16))
+                    Spacer()
+                    if let vpnBytes = model.status?.vpnBytes {
+                        Label("VPN \(bytes((vpnBytes.rx ?? 0) + (vpnBytes.tx ?? 0)))",
+                              systemImage: "shield.lefthalf.filled")
+                            .font(AppFont.medium(12)).foregroundStyle(.secondary)
+                    }
+                }
+                .help("Trafik sayaçları router yeniden başladığında sıfırlanır.")
                 LazyVGrid(columns: columns, spacing: 12) {
                     StatCard(title: "Wi-Fi trafiği", value: bytes((model.status?.wifi.rx ?? 0) + (model.status?.wifi.tx ?? 0)),
                              caption: "", symbol: "wifi")
                     StatCard(title: "İnternet (WAN)", value: bytes((model.status?.wan.rx ?? 0) + (model.status?.wan.tx ?? 0)),
                              caption: "", symbol: "network")
-                    if let vpnBytes = model.status?.vpnBytes {
-                        StatCard(title: "VPN trafiği", value: bytes((vpnBytes.rx ?? 0) + (vpnBytes.tx ?? 0)),
-                                 caption: "", symbol: "arrow.up.arrow.down")
-                    }
                 }
             }
             VStack(alignment: .leading, spacing: 10) {
-                Text("Sistem").font(AppFont.bold(16))
-                LazyVGrid(columns: systemColumns, spacing: 12) {
+                HStack {
+                    Text("Sistem").font(AppFont.bold(16))
+                    Spacer()
+                    Label(uptimeText, systemImage: "clock")
+                        .font(AppFont.medium(12)).foregroundStyle(.secondary)
+                }
+                LazyVGrid(columns: columns, spacing: 12) {
                     StatCard(title: "CPU", value: cpuText, caption: "", symbol: "cpu")
                     StatCard(title: "RAM", value: ramText, caption: ramDetail, symbol: "memorychip")
-                    StatCard(title: "Çalışma süresi", value: uptimeText, caption: "", symbol: "clock")
                 }
             }
-            Card("Router yardımcıları", symbol: "wrench.and.screwdriver") {
+            HStack(spacing: 12) {
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                Text("Router yardımcıları").font(AppFont.bold(15))
+                Spacer()
                 Button { model.install() } label: {
                     Label("Yardımcıları güncelle", systemImage: "arrow.down.circle")
                 }
                 .disabled(model.busy)
                 .help("Mevcut OpenWrt üzerindeki HappRouter betiklerini ve zamanlayıcıları günceller. Paket veya firmware yüklemez; VPN sunucu profilini değiştirmez.")
             }
+            .padding(16)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke))
         }
     }
 
@@ -1443,7 +1471,8 @@ private struct ContentView: View {
                 Label(blocked ? "Engeli kaldır" : "İnterneti engelle",
                       systemImage: blocked ? "lock.open" : "hand.raised")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(AppActionButtonStyle(tint: blocked ? Theme.accent : .red,
+                                              destructive: !blocked))
             .disabled(model.busy || model.reachable != true)
         }
         .padding(.vertical, 10)
@@ -1460,7 +1489,7 @@ private struct ContentView: View {
             Badge(text: "Engelli · çevrimdışı", color: .red)
             Spacer()
             Button("Engeli kaldır") { model.setDeviceBlocked(mac, blocked: false) }
-                .buttonStyle(.bordered)
+                .buttonStyle(AppActionButtonStyle())
                 .disabled(model.busy || model.reachable != true)
         }
         .padding(.vertical, 10)
