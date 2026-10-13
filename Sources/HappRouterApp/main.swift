@@ -735,21 +735,6 @@ private enum AppPage: String, CaseIterable, Identifiable {
     }
 }
 
-/// Başlık çubuğundaki yinelenen uygulama adını gizler; pencere kontrolleri kalır.
-private final class WindowTitleView: NSView {
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        window?.titleVisibility = .hidden
-    }
-}
-
-private struct HiddenWindowTitle: NSViewRepresentable {
-    func makeNSView(context: Context) -> WindowTitleView { WindowTitleView() }
-    func updateNSView(_ view: WindowTitleView, context: Context) {
-        view.window?.titleVisibility = .hidden
-    }
-}
-
 private struct ContentView: View {
     @StateObject private var model = DashboardModel()
     @AppStorage("HappRouterAppearance") private var appearance = "system"
@@ -791,7 +776,6 @@ private struct ContentView: View {
         .frame(minWidth: 960, minHeight: 680)
         .font(AppFont.regular(14))
         .tint(Theme.accent)
-        .background(HiddenWindowTitle().frame(width: 0, height: 0))
         .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
         .onAppear { model.refresh() }
         .onReceive(timer) { _ in model.refresh() }
@@ -1757,5 +1741,6 @@ struct HappRouterApp: App {
     var body: some Scene {
         WindowGroup("HappRouter") { ContentView() }
             .defaultSize(width: 1040, height: 800)
+            .windowStyle(.hiddenTitleBar)
     }
 }
