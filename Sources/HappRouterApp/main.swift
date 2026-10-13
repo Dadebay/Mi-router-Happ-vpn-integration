@@ -164,6 +164,13 @@ private enum Tone {
     }
 }
 
+private enum HelperUpdateState {
+    case idle
+    case running
+    case success(String)
+    case failure(String)
+}
+
 @MainActor
 private final class DashboardModel: ObservableObject {
     @Published var status: RouterStatus?
@@ -178,6 +185,7 @@ private final class DashboardModel: ObservableObject {
     @Published var lastRefresh: Date?
     @Published var exitIP: String?
     @Published var logs = ""
+    @Published var helperUpdate: HelperUpdateState = .idle
     @Published var deviceRates: [String: Double] = [:]
     @Published var expiration = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 6)) ?? Date()
     private var refreshing = false
@@ -264,16 +272,21 @@ private final class DashboardModel: ObservableObject {
 
     func install() {
         busy = true
+        helperUpdate = .running
         notify("Router yardımcıları kuruluyor…")
         Task {
-            defer { busy = false }
             do {
                 let data = try await Task.detached(priority: .utility) { try Backend.run("install") }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
-                notify(result.note ?? result.error ?? "Kurulum tamamlanamadı", result.ok ? .success : .error)
+                let detail = result.note ?? result.error ?? "Güncelleme tamamlanamadı"
+                helperUpdate = result.ok ? .success(detail) : .failure(detail)
+                notify(detail, result.ok ? .success : .error)
+                busy = false
                 if result.ok { refresh() } else { loadLogs() }
             } catch {
+                helperUpdate = .failure(error.localizedDescription)
                 notify(error.localizedDescription, .error)
+                busy = false
                 loadLogs()
             }
         }
@@ -697,6 +710,7 @@ private struct ContentView: View {
     @AppStorage("HappRouterAppearance") private var appearance = "system"
     @State private var selectedPage: AppPage? = .overview
     @State private var confirmDirect = false
+    @State private var showHelpersSheet = false
     @State private var showServerHelp = false
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
@@ -741,6 +755,7 @@ private struct ContentView: View {
         } message: {
             Text("VPN kapanır; HappVPN ağındaki tüm cihazlar gerçek IP adresiyle internete çıkar.")
         }
+        .sheet(isPresented: $showHelpersSheet) { helperUpdateSheet }
     }
 
     // MARK: Çerçeve
@@ -1338,7 +1353,10 @@ private struct ContentView: View {
                     .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
                 Text("Router yardımcıları").font(AppFont.bold(15))
                 Spacer()
-                Button { model.install() } label: {
+                Button {
+                    model.helperUpdate = .idle
+                    showHelpersSheet = true
+                } label: {
                     Label("Yardımcıları güncelle", systemImage: "arrow.down.circle")
                 }
                 .disabled(model.busy)
@@ -1347,6 +1365,101 @@ private struct ContentView: View {
             .padding(16)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke))
+        }
+    }
+
+    private var helperUpdateSheet: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 48, height: 48)
+                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Router yardımcıları").font(AppFont.display(22))
+                    Text("Mi Router 4C · 192.168.1.1")
+                        .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { showHelpersSheet = false } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(model.busy)
+                .accessibilityLabel("Kapat")
+            }
+
+            VStack(spacing: 0) {
+                helperUpdateRow("Router kontrolü", detail: "Model ve OpenWrt bileşenleri", symbol: "checkmark.shield")
+                Divider().padding(.leading, 44)
+                helperUpdateRow("Yardımcı dosyalar", detail: "VPN, süre ve trafik betikleri", symbol: "square.stack.3d.up")
+                Divider().padding(.leading, 44)
+                helperUpdateRow("Ölçüm görevleri", detail: "Sunucu ve cihaz verileri", symbol: "chart.bar.xaxis")
+            }
+            .padding(.horizontal, 16)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke))
+
+            helperUpdateFeedback
+
+            HStack(spacing: 12) {
+                Label("Mevcut VPN profili korunur", systemImage: "lock.shield")
+                    .font(AppFont.medium(12)).foregroundStyle(.secondary)
+                Spacer()
+                switch model.helperUpdate {
+                case .idle, .failure:
+                    Button { model.install() } label: {
+                        Label("Güncellemeyi başlat", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(AppActionButtonStyle(prominent: true))
+                    .disabled(model.busy)
+                case .running:
+                    ProgressView().controlSize(.small)
+                    Text("Güncelleniyor").font(AppFont.medium(12)).foregroundStyle(.secondary)
+                case .success:
+                    Button("Bitti") { showHelpersSheet = false }
+                        .buttonStyle(AppActionButtonStyle(prominent: true))
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 540)
+        .font(AppFont.regular(14))
+        .tint(Theme.accent)
+        .interactiveDismissDisabled(model.busy)
+    }
+
+    private func helperUpdateRow(_ title: String, detail: String, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 32, height: 32)
+                .background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(AppFont.semiBold(13))
+                Text(detail).font(AppFont.regular(11)).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 11)
+    }
+
+    @ViewBuilder private var helperUpdateFeedback: some View {
+        switch model.helperUpdate {
+        case .idle:
+            EmptyView()
+        case .running:
+            Label("Dosyalar router'a aktarılıyor. İşlem bitene kadar bekle.", systemImage: "arrow.triangle.2.circlepath")
+                .foregroundStyle(Theme.accent)
+        case .success(let detail):
+            Label(detail, systemImage: "checkmark.circle.fill")
+                .foregroundStyle(Theme.accent)
+        case .failure(let detail):
+            Label(detail, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
         }
     }
 
