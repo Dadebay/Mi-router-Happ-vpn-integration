@@ -35,6 +35,9 @@ CRON_ENTRIES = (
     '* * * * * /etc/happvpn/usage-sample.lua',
     '*/30 * * * * /etc/happvpn/probe-nodes.lua',
 )
+MAC_PATTERN = re.compile(r'[0-9a-f]{2}(?::[0-9a-f]{2}){5}')
+BLOCKED_FILE = '/etc/happvpn/blocked-macs'
+BLOCKED_NFT = '/etc/nftables.d/20-happ-router-block.nft'
 
 
 def setup():
@@ -311,10 +314,10 @@ def install_profile(source, expires_at, selected_tag=None):
 
 
 def status():
-    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; if netstat -lnt | grep -q ':1080 ' && netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
+    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__BLOCKED__\\n'; cat /etc/happvpn/blocked-macs 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; if netstat -lnt | grep -q ':1080 ' && netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
     raw = ssh(command, timeout=35).decode('utf-8', 'replace')
     sections = {}
-    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|PROBES|METRICS|NODES|ACTIVE|SYSTEM)__\n', raw)
+    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|BLOCKED|PROBES|METRICS|NODES|ACTIVE|SYSTEM)__\n', raw)
     for index in range(1, len(pieces) - 1, 2):
         sections[pieces[index]] = pieces[index + 1].strip()
     netdev = {}
@@ -358,6 +361,8 @@ def status():
                 continue
     for device in devices:
         device.update(usage.get(device['mac'], {}))
+    blocked_macs = [line.lower() for line in sections.get('BLOCKED', '').splitlines()
+                    if MAC_PATTERN.fullmatch(line.lower())]
     try:
         metrics = json.loads(sections.get('METRICS') or '{}')
     except json.JSONDecodeError:
@@ -398,7 +403,8 @@ def status():
     emit({'ok': True, 'vpnRunning': len(system) >= 2 and system[1].strip() == 'ready',
           'uptimeSeconds': float(system[0].split()[0]) if system else 0,
           'wifi': netdev.get('phy0-ap0', {}), 'wan': netdev.get('eth0.2', {}),
-          'vpnBytes': vpn_bytes, 'devices': devices, 'nodes': nodes,
+          'vpnBytes': vpn_bytes, 'devices': devices, 'blockedMACs': blocked_macs,
+          'nodes': nodes,
           'wifiDownloadToday': sum(item['downloadToday'] for item in usage.values()),
           'best': best['tag'] if best else 'happ-vpn',
           'fallback': active_outbound == 'happ-vpn',
@@ -406,6 +412,77 @@ def status():
           'expiresAt': expires_at,
           'mode': mode,
           'updatedAt': int(time.time())})
+
+
+def _blocked_macs():
+    lines = ssh(f'cat {BLOCKED_FILE} 2>/dev/null || true', timeout=20).decode('ascii').splitlines()
+    macs = {line.strip().lower() for line in lines if line.strip()}
+    if any(not MAC_PATTERN.fullmatch(mac) for mac in macs):
+        raise RuntimeError('Router engel listesi geçersiz; mevcut liste değiştirilmedi.')
+    return macs
+
+
+def _block_nft_text(macs):
+    elements = f"    elements = {{ {', '.join(sorted(macs))} }};\n" if macs else ''
+    return (
+        'set happ_router_blocked_macs {\n'
+        '    type ether_addr;\n'
+        f'{elements}'
+        '}\n'
+        'chain happ_router_block_proxy {\n'
+        '    type filter hook input priority filter - 2; policy accept;\n'
+        '    iifname "br-lan" ether saddr @happ_router_blocked_macs tcp dport 12345 drop\n'
+        '}\n'
+        'chain happ_router_block_forward {\n'
+        '    type filter hook forward priority filter - 2; policy accept;\n'
+        '    iifname "br-lan" ether saddr @happ_router_blocked_macs drop\n'
+        '}\n'
+    )
+
+
+def set_device_blocked(mac, blocked):
+    mac = (mac or '').strip().lower()
+    if not MAC_PATTERN.fullmatch(mac) or int(mac[:2], 16) & 1:
+        raise ValueError('Cihaz MAC adresi geçersiz.')
+    current = _blocked_macs()
+    updated = (current | {mac}) if blocked else (current - {mac})
+    if updated == current:
+        emit({'ok': True, 'note': 'Cihaz engeli zaten güncel.'})
+        return
+    snippet = _block_nft_text(updated)
+    list_text = '\n'.join(sorted(updated)) + ('\n' if updated else '')
+    script = (
+        'set -eu\n'
+        f'file={BLOCKED_NFT}\n'
+        f'list={BLOCKED_FILE}\n'
+        'old=$(mktemp /tmp/happ-block-old.XXXXXX)\n'
+        'check=$(mktemp /tmp/happ-block-check.XXXXXX)\n'
+        'had_old=0\n'
+        '[ ! -e "$file" ] || { cp "$file" "$old"; had_old=1; }\n'
+        'restore() {\n'
+        '  if [ "$had_old" = 1 ]; then cp "$old" "$file"; else rm -f "$file"; fi\n'
+        '  /etc/init.d/firewall reload >/dev/null 2>&1 || true\n'
+        '  rm -f "$old" "$check" "$file.new" "$list.new"\n'
+        '}\n'
+        'umask 077\n'
+        'mkdir -p /etc/happvpn\n'
+        "cat > \"$file.new\" <<'NFT'\n" + snippet + 'NFT\n'
+        'mv "$file.new" "$file"\n'
+        'if ! fw4 print > "$check" || ! nft -c -f "$check"; then\n'
+        '  restore; echo "Engel kuralı doğrulanamadı" >&2; exit 1\n'
+        'fi\n'
+        'if ! /etc/init.d/firewall reload || '
+        '! nft list chain inet fw4 happ_router_block_forward >/dev/null 2>&1 || '
+        '! nft list chain inet fw4 happ_router_block_proxy >/dev/null 2>&1; then\n'
+        '  restore; echo "Engel kuralı uygulanamadı" >&2; exit 1\n'
+        'fi\n'
+        "cat > \"$list.new\" <<'MACS'\n" + list_text + 'MACS\n'
+        'mv "$list.new" "$list"\n'
+        'rm -f "$old" "$check"\n'
+    )
+    ssh('sh -s', stdin=script.encode('utf-8'), timeout=45)
+    emit({'ok': True, 'note': 'Cihazın internet engeli açıldı.' if blocked
+          else 'Cihazın internet engeli kaldırıldı.'})
 
 
 def set_expiry(expires_at):
@@ -488,10 +565,12 @@ def active_test(emit_result=True, remote_port=1080):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['status', 'preview', 'test', 'apply', 'expiry',
-                                            'mode-vpn', 'mode-direct', 'install', 'logs'])
+                                            'mode-vpn', 'mode-direct', 'install', 'logs',
+                                            'block-device', 'unblock-device'])
     parser.add_argument('--url')
     parser.add_argument('--expires', type=int)
     parser.add_argument('--tag')
+    parser.add_argument('--mac')
     args = parser.parse_args()
     try:
         if args.command == 'status':
@@ -514,6 +593,8 @@ def main():
             set_expiry(args.expires)
         elif args.command in ('mode-vpn', 'mode-direct'):
             set_mode(args.command.removeprefix('mode-'))
+        elif args.command in ('block-device', 'unblock-device'):
+            set_device_blocked(args.mac, args.command == 'block-device')
     except Exception as exc:
         emit({'ok': False, 'error': str(exc)})
         sys.exit(1)

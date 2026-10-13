@@ -48,6 +48,7 @@ private struct RouterStatus: Decodable {
     let wan: ByteCounter
     let vpnBytes: ByteCounter?
     let devices: [Device]
+    let blockedMACs: [String]
     let wifiDownloadToday: Int64
     let nodes: [Node]
     let best: String
@@ -71,7 +72,7 @@ private struct BackendResult: Decodable {
 
 private enum Backend {
     static func run(_ command: String, input: String? = nil, expires: Int? = nil,
-                    tag: String? = nil) throws -> Data {
+                    tag: String? = nil, mac: String? = nil) throws -> Data {
         let script: URL
         if let resource = Bundle.main.resourceURL?.appendingPathComponent("routerctl.py"),
            FileManager.default.fileExists(atPath: resource.path) {
@@ -85,9 +86,12 @@ private enum Backend {
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = [script.path, command] + (input == nil ? [] : ["--url", "-"]) +
-            (expires.map { ["--expires", String($0)] } ?? []) +
-            (tag.map { ["--tag", $0] } ?? [])
+        var arguments = [script.path, command]
+        if input != nil { arguments += ["--url", "-"] }
+        if let expires { arguments += ["--expires", String(expires)] }
+        if let tag { arguments += ["--tag", tag] }
+        if let mac { arguments += ["--mac", mac] }
+        process.arguments = arguments
         let output = Pipe()
         let error = Pipe()
         process.standardOutput = output
@@ -142,7 +146,7 @@ private enum Tone {
     var color: Color {
         switch self {
         case .info: .secondary
-        case .success: .green
+        case .success: Theme.accent
         case .warning: .orange
         case .error: .red
         }
@@ -378,6 +382,29 @@ private final class DashboardModel: ObservableObject {
             } catch { notify(error.localizedDescription, .error) }
         }
     }
+
+    func setDeviceBlocked(_ mac: String, blocked: Bool) {
+        busy = true
+        notify(blocked ? "Cihazın interneti engelleniyor…" : "Cihaz engeli kaldırılıyor…")
+        Task {
+            defer { busy = false }
+            do {
+                let data = try await Task.detached(priority: .utility) {
+                    try Backend.run(blocked ? "block-device" : "unblock-device", mac: mac)
+                }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                if result.ok {
+                    notify(result.note ?? "Cihaz ayarı kaydedildi", .success)
+                    busy = false
+                    refresh()
+                } else {
+                    notify(result.error ?? "Cihaz ayarı değiştirilemedi", .error)
+                }
+            } catch {
+                notify(error.localizedDescription, .error)
+            }
+        }
+    }
 }
 
 // MARK: - Biçimlendirme
@@ -397,13 +424,13 @@ private func rate(_ value: Double?) -> String {
 }
 
 private func latencyColor(_ ms: Double) -> Color {
-    ms < 150 ? .green : (ms < 400 ? .orange : .red)
+    ms < 150 ? Theme.accent : (ms < 400 ? .orange : .red)
 }
 
 // MARK: - Ortak bileşenler
 
 private enum Theme {
-    static let accent = Color.teal
+    static let accent = Color(red: 0.16, green: 0.39, blue: 0.93)
     static let card = Color(nsColor: .controlBackgroundColor)
     static let stroke = Color.primary.opacity(0.08)
 }
@@ -523,7 +550,7 @@ private struct StepHeader: View {
     var body: some View {
         HStack(spacing: 10) {
             ZStack {
-                Circle().fill(done ? Color.green : (active ? Theme.accent : Color.secondary.opacity(0.25)))
+                Circle().fill(done || active ? Theme.accent : Color.secondary.opacity(0.25))
                 if done {
                     Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                 } else {
@@ -542,7 +569,7 @@ private enum HealthState {
     case good, warn, bad, unknown
     var color: Color {
         switch self {
-        case .good: .green
+        case .good: Theme.accent
         case .warn: .orange
         case .bad: .red
         case .unknown: .secondary
@@ -651,6 +678,7 @@ private enum AppPage: String, CaseIterable, Identifiable {
 
 private struct ContentView: View {
     @StateObject private var model = DashboardModel()
+    @AppStorage("HappRouterAppearance") private var appearance = "system"
     @State private var selectedPage: AppPage? = .overview
     @State private var confirmDirect = false
     @State private var showServerHelp = false
@@ -666,27 +694,32 @@ private struct ContentView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    pageHeader
-                    switch page {
-                    case .overview: overviewPage
-                    case .vpn: vpnPage
-                    case .router: routerPage
-                    case .devices: devicesPage
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        pageHeader
+                        switch page {
+                        case .overview: overviewPage
+                        case .vpn: vpnPage
+                        case .router: routerPage
+                        case .devices: devicesPage
+                        }
                     }
+                    .frame(maxWidth: page == .devices ? 760 : 940, alignment: .leading)
+                    .frame(maxWidth: .infinity,
+                           minHeight: max(0, geometry.size.height - 48),
+                           alignment: page == .devices ? .center : .top)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 24)
                 }
-                .frame(maxWidth: 940, alignment: .leading)
-                .padding(.horizontal, 28)
-                .padding(.vertical, 24)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .background(Color(nsColor: .windowBackgroundColor))
             }
-            .background(Color(nsColor: .windowBackgroundColor))
             .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
         }
         .frame(minWidth: 960, minHeight: 680)
         .font(AppFont.regular(14))
         .tint(Theme.accent)
+        .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
         .onAppear { model.refresh() }
         .onReceive(timer) { _ in model.refresh() }
         .confirmationDialog("Normal internete geçilsin mi?", isPresented: $confirmDirect, titleVisibility: .visible) {
@@ -726,10 +759,19 @@ private struct ContentView: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 8) {
-                Circle().fill(heroTint).frame(width: 8, height: 8)
-                Text(heroTitle).font(AppFont.medium(12)).lineLimit(1)
-                Spacer()
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Görünüm", selection: $appearance) {
+                    Text("Sistem").tag("system")
+                    Text("Açık").tag("light")
+                    Text("Koyu").tag("dark")
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                HStack(spacing: 8) {
+                    Circle().fill(heroTint).frame(width: 8, height: 8)
+                    Text(heroTitle).font(AppFont.medium(12)).lineLimit(1)
+                    Spacer()
+                }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
@@ -785,7 +827,7 @@ private struct ContentView: View {
         if model.reachable == false { return .red }
         if model.status == nil { return .orange }
         if isDirect { return .blue }
-        return vpnRunning ? .green : .orange
+        return vpnRunning ? Theme.accent : .orange
     }
 
     private var heroSymbol: String {
@@ -1138,7 +1180,7 @@ private struct ContentView: View {
                 .frame(width: 9, height: 9)
             Text(node.name).font(AppFont.medium(13)).lineLimit(1)
             if isActive { Badge(text: "Aktif", color: Theme.accent) }
-            if isBest { Badge(text: "En düşük", color: .green) }
+            if isBest { Badge(text: "En düşük", color: Theme.accent) }
             Spacer()
             if alive {
                 GeometryReader { proxy in
@@ -1229,7 +1271,7 @@ private struct ContentView: View {
                 HStack(alignment: .top, spacing: 12) {
                     ModeCard(title: "VPN modu",
                              detail: "HappVPN ağındaki cihazlar Happ sunucusu üzerinden internete çıkar.",
-                             symbol: "checkmark.shield.fill", tint: .green,
+                             symbol: "checkmark.shield.fill", tint: Theme.accent,
                              selected: !isDirect && model.status != nil,
                              disabled: model.busy || model.status == nil || !vpnRunning) {
                         model.changeMode("vpn")
@@ -1272,11 +1314,11 @@ private struct ContentView: View {
                     InfoRow(label: "Wi-Fi ağı", value: "HappVPN")
                     Divider()
                     InfoRow(label: "İnternet modu", value: isDirect ? "Normal internet" : "VPN",
-                            valueColor: isDirect ? .blue : .green)
+                            valueColor: Theme.accent)
                     Divider()
                     InfoRow(label: "Shadowsocks servisi",
                             value: vpnRunning ? "Çalışıyor" : "Çalışmıyor",
-                            valueColor: vpnRunning ? .green : .orange)
+                            valueColor: vpnRunning ? Theme.accent : .orange)
                 }
             }
             Card("Router kurulumu",
@@ -1307,6 +1349,11 @@ private struct ContentView: View {
             .reduce(0) { $0 + ($1.downloadToday ?? 0) }
     }
 
+    private var offlineBlockedMACs: [String] {
+        let connected = Set(sortedDevices.map { $0.mac.lowercased() })
+        return (model.status?.blockedMACs ?? []).filter { !connected.contains($0) }
+    }
+
     private func deviceSymbol(_ device: Device) -> String {
         if device.type != "Wi-Fi" { return "cable.connector" }
         let name = (device.name ?? "").lowercased()
@@ -1329,7 +1376,7 @@ private struct ContentView: View {
                          caption: "", symbol: "arrow.down.circle")
             }
             Card {
-                if sortedDevices.isEmpty {
+                if sortedDevices.isEmpty && offlineBlockedMACs.isEmpty {
                     VStack(spacing: 6) {
                         Image(systemName: "wifi.exclamationmark").font(.title2).foregroundStyle(.secondary)
                         Text("Cihaz görünmüyor").font(AppFont.semiBold(14))
@@ -1339,7 +1386,13 @@ private struct ContentView: View {
                     VStack(spacing: 0) {
                         ForEach(sortedDevices) { device in
                             deviceRow(device)
-                            if device.id != sortedDevices.last?.id { Divider() }
+                            if device.id != sortedDevices.last?.id || !offlineBlockedMACs.isEmpty {
+                                Divider()
+                            }
+                        }
+                        ForEach(offlineBlockedMACs, id: \.self) { mac in
+                            offlineBlockedRow(mac)
+                            if mac != offlineBlockedMACs.last { Divider() }
                         }
                     }
                 }
@@ -1349,6 +1402,7 @@ private struct ContentView: View {
 
     private func deviceRow(_ device: Device) -> some View {
         let isWifi = device.type == "Wi-Fi"
+        let blocked = model.status?.blockedMACs.contains(device.mac.lowercased()) == true
         let live = model.deviceRates[device.mac]
         let maxToday = max(sortedDevices.compactMap(\.downloadToday).max() ?? 1, 1)
         let share = Double(device.downloadToday ?? 0) / Double(maxToday)
@@ -1363,11 +1417,12 @@ private struct ContentView: View {
                     Text(device.name?.isEmpty == false ? device.name! : "Bilinmeyen cihaz")
                         .font(AppFont.semiBold(13)).lineLimit(1)
                     Badge(text: isWifi ? "Wi-Fi" : "Kablolu", color: isWifi ? Theme.accent : .secondary)
+                    if blocked { Badge(text: "Engelli", color: .red) }
                 }
             }
             Spacer(minLength: 12)
             if isWifi, let live, live > 50 * 1024 {
-                Badge(text: "↓ " + rate(live), color: .green)
+                Badge(text: "↓ " + rate(live), color: Theme.accent)
             } else if isWifi {
                 Text("↓ " + rate(live)).font(AppFont.regular(11)).foregroundStyle(.secondary)
             }
@@ -1382,6 +1437,31 @@ private struct ContentView: View {
                 .opacity(device.downloadToday == nil ? 0 : 1)
             }
             .frame(width: 100, alignment: .trailing)
+            Button {
+                model.setDeviceBlocked(device.mac, blocked: !blocked)
+            } label: {
+                Label(blocked ? "Engeli kaldır" : "İnterneti engelle",
+                      systemImage: blocked ? "lock.open" : "hand.raised")
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.busy || model.reachable != true)
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func offlineBlockedRow(_ mac: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.red)
+                .frame(width: 36, height: 36)
+                .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            Text(mac).font(AppFont.semiBold(13))
+            Badge(text: "Engelli · çevrimdışı", color: .red)
+            Spacer()
+            Button("Engeli kaldır") { model.setDeviceBlocked(mac, blocked: false) }
+                .buttonStyle(.bordered)
+                .disabled(model.busy || model.reachable != true)
         }
         .padding(.vertical, 10)
     }

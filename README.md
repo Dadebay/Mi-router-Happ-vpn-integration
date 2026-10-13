@@ -14,7 +14,8 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt/Shadowsocks VPN için macOS kontrol pane
 - Router sayfasında mevcut OpenWrt/Shadowsocks kurulumunun yardımcı dosyalarını ve zamanlayıcılarını tek düğmeyle yükleme; VPN sayfasında test hatası ve servis günlüklerini görüntüleme
 
 **Kurulum düğmesinin kapsamı:** Mac ile LAN üzerinden erişilen, SSH anahtarı tanıtılmış Xiaomi 4C üzerinde mevcut OpenWrt/Shadowsocks temelini denetler; yardımcı betikleri, servis dosyasını ve cron görevlerini yeniden yükler. İlk firmware kurulumu, SSH anahtarı tanıtma ve Shadowsocks paketlerinin yüklenmesi bu düğmenin kapsamı dışındadır. Eksik ön koşullar uygulamada açık hata olarak gösterilir. Kurulum sırasında mevcut sunucu profili ve internet modu korunur.
-- Cihazlar sayfasında Wi-Fi cihazı başına indirme hızı ve bugün indirilen veri
+- Cihazlar sayfasında bağlı Wi-Fi cihazlarının bugünkü toplam indirmesi, cihaz başına indirme hızı ve internet engeli
+- Kaydedilen Sistem / Açık / Koyu görünüm seçimi ve mavi ana renk
 
 **13 Ekim 2026 çalışan router sürümü:** Happ uygulamasından alınan Shadowsocks sunucu profili, Xiaomi Mi Router 4C üzerinde `ss-local` ve `ss-redir` ile çalışıyor. Router yeniden başlatıldıktan sonra servis otomatik açıldı. Android telefon `HappVPN` Wi-Fi ağına bağlandığında çıkış IP'si `78.232.59.122` olarak ve YouTube erişimiyle doğrulandı. DNS istekleri VPN içinden iletiliyor. `Scripts/happ-ss.init`, `Scripts/happ-ss.nft` ve `Scripts/mode.sh` bu çalışan yönlendirme düzeninin kaynak dosyalarıdır.
 
@@ -49,3 +50,5 @@ Router 64 MB RAM ve tek çekirdekli. Xray/VLESS yolu bu cihazda açılışta tak
 Elle doğrudan internet ve VPN moduna geçiş router'da doğrulandı; geçişten sonra VPN çıkış IP'si tekrar başarıyla ölçüldü. Telefonla doğrudan mod trafik testi ayrıca yapılmalıdır.
 
 Wi-Fi cihaz sayaçları router’da dakikada bir toplanır. Anlık indirme hızı uygulama açıkken ardışık 10 saniyelik okumaların farkından hesaplanır. Günlük toplam Ashgabat gününe göredir; router sayaç dosyasını saatte bir kalıcı depoya yazar. Elektrik kesintisinde en fazla yaklaşık bir saatlik toplam kaybolabilir. Kablolu cihaz başına sayaç henüz yoktur. Wi-Fi cihazının yerel ağ trafiği de kablosuz sayaçlara dahil olabilir.
+
+Cihaz engeli MAC adresine göre VPN ve doğrudan internet trafiğini durdurur; router yönetim erişimi açık kalır. Engelli cihaz Wi-Fi ağına bağlı görünmeye devam edebilir. Çevrimdışı olsa bile Cihazlar sayfasından engeli kaldırılabilir. Telefonun özel/rastgele MAC adresi değişirse yeni adrese ayrıca engel koymak gerekir.
