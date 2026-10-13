@@ -260,14 +260,7 @@ def _parse_ss_uri(value):
     return name, config
 
 
-def parse_profiles(source):
-    source = source.strip()
-    if len(source) > 512 * 1024:
-        raise ValueError('Profil çok büyük.')
-    if source.startswith('happ://'):
-        raise ValueError('Şifreli Happ bağlantısını router açamıyor. Happ içinden "Copy Server JSON" ile sunucuyu kopyalayın.')
-    if source.startswith('https://'):
-        source = fetch_subscription(source)
+def _profile_entries(source):
     entries = []
     if source.startswith('{'):
         try:
@@ -291,6 +284,29 @@ def parse_profiles(source):
             line = line.strip()
             if line.startswith('ss://'):
                 entries.append(_parse_ss_uri(line))
+    return entries
+
+
+def parse_profiles(source):
+    source = source.strip()
+    if len(source) > 512 * 1024:
+        raise ValueError('Profil çok büyük.')
+    if source.startswith('happ://'):
+        raise ValueError('Şifreli Happ bağlantısını router açamıyor. Happ içinden "Copy Server JSON" ile sunucuyu kopyalayın.')
+    lines = [line.strip() for line in source.splitlines() if line.strip()]
+    urls = [line for line in lines if line.startswith('https://')]
+    if urls:
+        if len(lines) != len(urls) or len(urls) > 2:
+            raise ValueError('En fazla iki HTTPS abonelik adresi girin; her adres ayrı satırda olmalı.')
+        entries = []
+        for url in urls:
+            provider = urllib.parse.urlsplit(url).hostname or 'Abonelik'
+            fetched = fetch_subscription(url)
+            for name, config in _profile_entries(fetched):
+                label = f'{provider} · {name}' if len(urls) > 1 else name
+                entries.append((label, config))
+    else:
+        entries = _profile_entries(source)
     if not entries:
         raise ValueError('Desteklenen Shadowsocks sunucusu bulunamadı. Happ içinden "Copy Server JSON" kullanın.')
     if len(entries) > 200:

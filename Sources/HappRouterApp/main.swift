@@ -132,7 +132,8 @@ private enum Backend {
 
 private enum SecretStore {
     private static let service = "HappRouter.subscription"
-    static func read() -> String {
+    private static let additionalService = "HappRouter.additionalSubscription"
+    private static func read(service: String) -> String {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: service,
                                     kSecReturnData as String: true,
@@ -142,15 +143,20 @@ private enum SecretStore {
               let data = result as? Data else { return "" }
         return String(data: data, encoding: .utf8) ?? ""
     }
-    static func write(_ value: String) {
+    private static func write(_ value: String, service: String) {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: service]
         SecItemDelete(query as CFDictionary)
+        if value.isEmpty { return }
         let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service,
                                    kSecValueData as String: Data(value.utf8)]
         SecItemAdd(item as CFDictionary, nil)
     }
+    static func read() -> String { read(service: service) }
+    static func readAdditional() -> String { read(service: additionalService) }
+    static func write(_ value: String) { write(value, service: service) }
+    static func writeAdditional(_ value: String) { write(value, service: additionalService) }
 }
 
 private enum Tone {
@@ -189,6 +195,7 @@ private final class DashboardModel: ObservableObject {
     @Published var candidateExitIP: String?
     @Published var candidateError: String?
     @Published var subscription = SecretStore.read()
+    @Published var additionalSubscription = SecretStore.readAdditional()
     @Published var showSubscription = false
     @Published var busy = false
     @Published var message = "Router bağlantısı kontrol ediliyor…"
@@ -216,6 +223,18 @@ private final class DashboardModel: ObservableObject {
 
     var expiryEpoch: Int {
         Int((Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: expiration) ?? expiration).timeIntervalSince1970)
+    }
+
+    var profileInput: String {
+        let primary = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let additional = additionalSubscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if primary.isEmpty { return "" }
+        return additional.isEmpty ? primary : primary + "\n" + additional
+    }
+
+    private func saveProfiles() {
+        SecretStore.write(subscription.trimmingCharacters(in: .whitespacesAndNewlines))
+        SecretStore.writeAdditional(additionalSubscription.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     func notify(_ text: String, _ tone: Tone = .info) {
@@ -455,7 +474,7 @@ private final class DashboardModel: ObservableObject {
     }
 
     func preview() {
-        let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = profileInput
         guard !profile.isEmpty else { notify("Sunucu profilini girin", .warning); return }
         busy = true
         previewNodes = []
@@ -468,13 +487,13 @@ private final class DashboardModel: ObservableObject {
             do {
                 let data = try await Task.detached(priority: .utility) { try Backend.run("preview", input: profile) }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
-                guard subscription.trimmingCharacters(in: .whitespacesAndNewlines) == profile else { return }
+                guard profileInput == profile else { return }
                 if result.ok {
                     previewNodes = result.nodes ?? []
                     selectedNodeTag = previewNodes.first?.tag ?? ""
                     candidateExitIP = nil
                     candidateError = nil
-                    SecretStore.write(profile)
+                    saveProfiles()
                     notify("\(result.count ?? 0) sunucu getirildi. Şimdi bağlantıyı test edin.", .info)
                 } else { notify(result.error ?? "Profil okunamadı", .error) }
             } catch { notify(error.localizedDescription, .error) }
@@ -482,7 +501,7 @@ private final class DashboardModel: ObservableObject {
     }
 
     func probeProfile() {
-        let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = profileInput
         guard !profile.isEmpty, !selectedNodeTag.isEmpty, !busy else { return }
         let tag = selectedNodeTag
         busy = true
@@ -496,7 +515,7 @@ private final class DashboardModel: ObservableObject {
                     try Backend.run("profile-test", input: profile, tag: tag)
                 }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
-                guard subscription.trimmingCharacters(in: .whitespacesAndNewlines) == profile,
+                guard profileInput == profile,
                       selectedNodeTag == tag else { return }
                 if result.ok {
                     candidateExitIP = result.exitIP
@@ -507,7 +526,7 @@ private final class DashboardModel: ObservableObject {
                     notify(message, .error)
                 }
             } catch {
-                guard subscription.trimmingCharacters(in: .whitespacesAndNewlines) == profile,
+                guard profileInput == profile,
                       selectedNodeTag == tag else { return }
                 let message = error.localizedDescription
                 candidateError = message
@@ -517,7 +536,7 @@ private final class DashboardModel: ObservableObject {
     }
 
     func apply() {
-        let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = profileInput
         guard !profile.isEmpty else { notify("Sunucu profilini girin", .warning); return }
         guard !selectedNodeTag.isEmpty, candidateExitIP != nil else {
             notify("Önce seçilen sunucunun bağlantısını test edin.", .warning)
@@ -535,7 +554,7 @@ private final class DashboardModel: ObservableObject {
                 }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
                 if result.ok {
-                    SecretStore.write(profile)
+                    saveProfiles()
                     exitIP = result.exitIP
                     exitError = nil
                     exitTestedAt = Date()
@@ -551,12 +570,12 @@ private final class DashboardModel: ObservableObject {
         }
     }
 
-    func pasteProfile() {
+    func pasteProfile(additional: Bool = false) {
         guard let value = NSPasteboard.general.string(forType: .string), !value.isEmpty else {
             notify("Panoda metin bulunamadı", .warning)
             return
         }
-        subscription = value
+        if additional { additionalSubscription = value } else { subscription = value }
         previewNodes = []
         selectedNodeTag = ""
         notify("Adres yapıştırıldı. Şimdi sunucuları getirin.")
@@ -1343,6 +1362,8 @@ private struct ContentView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     StepHeader(number: 1, title: "Bağlantıyı ekle",
                                done: !model.previewNodes.isEmpty, active: true)
+                    Text("1. abonelik veya sunucu profili")
+                        .font(AppFont.medium(12)).foregroundStyle(.secondary)
                     HStack(alignment: .top) {
                         Group {
                             if model.showSubscription {
@@ -1374,6 +1395,42 @@ private struct ContentView: View {
                         }
                         .help(model.showSubscription ? "Profili gizle" : "Profili göster")
                     }
+                    Text("2. abonelik · isteğe bağlı")
+                        .font(AppFont.medium(12)).foregroundStyle(.secondary)
+                    HStack(alignment: .top) {
+                        Group {
+                            if model.showSubscription {
+                                TextEditor(text: $model.additionalSubscription)
+                                    .font(AppFont.regular(12))
+                                    .scrollContentBackground(.hidden)
+                                    .padding(6)
+                                    .frame(height: 58)
+                                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
+                            } else {
+                                SecureField("İkinci HTTPS abonelik adresi", text: $model.additionalSubscription)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+                        .disabled(model.busy)
+                        .onChange(of: model.additionalSubscription) { _, _ in
+                            model.previewNodes = []
+                            model.selectedNodeTag = ""
+                            model.candidateExitIP = nil
+                            model.candidateError = nil
+                        }
+                        Button { model.pasteProfile(additional: true) } label: {
+                            Label("Yapıştır", systemImage: "doc.on.clipboard")
+                        }
+                        .disabled(model.busy)
+                        if !model.additionalSubscription.isEmpty {
+                            Button { model.additionalSubscription = "" } label: {
+                                Image(systemName: "xmark.circle")
+                            }
+                            .help("İkinci aboneliği kaldır")
+                            .disabled(model.busy)
+                        }
+                    }
                     HStack {
                         Button { model.preview() } label: {
                             Label("Sunucuları getir", systemImage: "arrow.down.to.line")
@@ -1387,6 +1444,8 @@ private struct ContentView: View {
                             Text("ss:// ve Shadowsocks içeren HTTPS bağlantıları desteklenir. happ:// bağlantısını önce Happ'te aç. Hysteria ve VLESS bu router'da desteklenmez.")
                                 .foregroundStyle(.secondary)
                             Text("Birden fazla ss:// adresi için göz simgesini açıp her adresi ayrı satıra yapıştır.")
+                                .foregroundStyle(.secondary)
+                            Text("İki HTTPS aboneliği için adresleri 1. ve 2. alanlara ayrı ayrı yapıştır.")
                                 .foregroundStyle(.secondary)
                         }
                         .font(AppFont.regular(12))

@@ -68,6 +68,34 @@ class ProfileMigrationTests(unittest.TestCase):
         self.assertIn('printf auto > /etc/happvpn/selection-mode', commands)
 
 
+class MultipleSubscriptionTests(unittest.TestCase):
+    def test_two_https_subscriptions_form_one_server_list(self):
+        first = 'https://first.example/sub/private-token'
+        second = 'https://second.example/sub/another-token'
+        with patch.object(routerctl, 'fetch_subscription', side_effect=[
+            'ss://aes-128-gcm:pass123@example.com:443#France',
+            'ss://aes-128-gcm:pass456@example.net:443#Finland',
+        ]) as fetch:
+            profiles = routerctl.parse_profiles(first + '\n' + second)
+
+        self.assertEqual([node['tag'] for node, _ in profiles], ['ss-00', 'ss-01'])
+        self.assertEqual([node['name'] for node, _ in profiles],
+                         ['first.example · France', 'second.example · Finland'])
+        self.assertEqual([config['server'] for _, config in profiles],
+                         ['example.com', 'example.net'])
+        self.assertNotIn('private-token', json.dumps([node for node, _ in profiles]))
+        self.assertNotIn('another-token', json.dumps([node for node, _ in profiles]))
+        self.assertEqual(fetch.call_count, 2)
+
+    def test_rejects_more_than_two_or_mixed_https_sources(self):
+        with patch.object(routerctl, 'fetch_subscription') as fetch:
+            with self.assertRaisesRegex(ValueError, 'En fazla iki HTTPS'):
+                routerctl.parse_profiles('https://a.example/sub\nhttps://b.example/sub\nhttps://c.example/sub')
+            with self.assertRaisesRegex(ValueError, 'En fazla iki HTTPS'):
+                routerctl.parse_profiles('https://a.example/sub\nss://aes-128-gcm:pass@example.com:443')
+        fetch.assert_not_called()
+
+
 class ServerSelectionTests(unittest.TestCase):
     def test_rejects_invalid_tag_before_ssh(self):
         with patch.object(routerctl, 'ssh') as ssh:

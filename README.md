@@ -33,7 +33,7 @@ Shadowsocks sunucuları için TCP erişim testi 30 dakikada bir çalışır. Oto
 
 Uygulama router'a `192.168.1.1` adresinden SSH ile bağlanır. Yerel SSH anahtarını `~/.happ-router` altında kullanır. Mac'in Wi-Fi ayarlarını değiştirmez. Router'daki VPN ve süre dolumu görevi Mac kapalıyken çalışır.
 
-Happ macOS uygulamasında çalışan Shadowsocks sunucusunu seçip **Copy Server JSON** komutunu kullan. HappRouter'da sırayla **Yapıştır**, **Sunucuları getir**, **Bağlantıyı test et** ve başarılıysa **Sunucuyu kur** düğmelerini kullan. Sunucuları getirmek yalnızca profili okur; bağlantı testi kurulu VPN'i değiştirmeden gerçek HTTPS çıkışını doğrular. Kurulum sırasında bağlantı yeniden doğrulanır. Birden fazla sunucu için çoklu `ss://` profili veya Shadowsocks içeren HTTPS aboneliği ekle. Şifreli `happ://crypt5` bağlantıları doğrudan çözülemez; Happ içinden sunucu JSON'u alınmalıdır. Yalnızca VLESS veya Hysteria profilleri içeren abonelikler bu router üzerinde desteklenmez.
+Happ macOS uygulamasında çalışan Shadowsocks sunucusunu seçip **Copy Server JSON** komutunu kullan. HappRouter'da sırayla **Yapıştır**, **Sunucuları getir**, **Bağlantıyı test et** ve başarılıysa **Sunucuyu kur** düğmelerini kullan. Sunucuları getirmek yalnızca profili okur; bağlantı testi kurulu VPN'i değiştirmeden gerçek HTTPS çıkışını doğrular. Kurulum sırasında bağlantı yeniden doğrulanır. İki HTTPS aboneliği için adresleri ayrı alanlara yapıştır; desteklenen Shadowsocks sunucuları tek listede görünür ve kurulumdan sonra otomatik seçim ikisi arasında çalışır. Tek profil alanında birden fazla `ss://` bağlantısı da kullanılabilir. Şifreli `happ://crypt5` bağlantıları doğrudan çözülemez; Happ içinden sunucu JSON'u alınmalıdır. Yalnızca VLESS veya Hysteria profilleri içeren abonelikler bu router üzerinde desteklenmez.
 
 ## Geliştirme
 
@@ -45,7 +45,7 @@ python3 -m py_compile Scripts/routerctl.py
 
 Uygulamayı paketlerken `Scripts/routerctl.py` ve `Scripts/RouterScripts` kaynaklarını ekleyin. `Scripts/build-app.sh` bunu yapar. Gilroy fontlarını kullanıcıya ait yerel font klasöründen paketleyin; lisanslı font dosyaları depoda bulunmaz.
 
-Girilen profil uygulamada Keychain'de, aktif sunucu parolası router'da yalnızca root erişimli dosyada saklanır. VPN kimlik bilgileri ve özel SSH anahtarı bu depoya eklenmez. Veri sayaçları aylık fatura miktarı değildir; router yeniden başladığında sıfırlanır.
+Girilen abonelikler uygulamada Keychain'de, aktif sunucu parolası router'da yalnızca root erişimli dosyada saklanır. VPN kimlik bilgileri ve özel SSH anahtarı bu depoya eklenmez. Veri sayaçları aylık fatura miktarı değildir; router yeniden başladığında sıfırlanır.
 
 Uygulama, VPN modu açıldığında dış IPv4 adresini router'ın SOCKS çıkışından ölçer. Ölçüm başarısızsa önceki IP'yi güncelmiş gibi göstermez; Cihazlar sayfasındaki yerel IPv4 adresleri ise DHCP ve router komşu tablosundan bağımsız okunur. TCP gecikmesi tek başına çalışan internet çıkışını doğrulamaz.
 
