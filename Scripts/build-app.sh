@@ -4,19 +4,15 @@ set -eu
 PROJECT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 APP=${1:-"$HOME/Applications/HappRouter.app"}
 FONTS=${HAPP_ROUTER_FONTS:-"$HOME/Developer/apps/projects/food_delivery/food_delivery/assets/fonts"}
-VALIDATOR="$PROJECT/Tools/xray-validator"
 
 cd "$PROJECT"
 swift build -c release
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Fonts" "$APP/Contents/Resources/RouterScripts"
 cp .build/release/HappRouter "$APP/Contents/MacOS/HappRouter"
 cp Scripts/routerctl.py "$APP/Contents/Resources/routerctl.py"
-for name in mode.sh expiry-check.sh probe-nodes.lua usage-sample.lua; do
+for name in mode.sh expiry-check.sh probe-nodes.lua usage-sample.lua dns-relay.lua happ-ss.init happ-ss.nft; do
   cp "Scripts/$name" "$APP/Contents/Resources/RouterScripts/$name"
 done
-if [ -x "$VALIDATOR" ]; then
-  cp "$VALIDATOR" "$APP/Contents/Resources/xray-validator"
-fi
 rm -f "$APP/Contents/Resources/Fonts/QurovaDEMO-Medium.otf"
 for name in Gilroy-Regular.ttf Gilroy-Medium.ttf Gilroy-SemiBold.ttf Gilroy-Bold.ttf Gilroy-Extrabold.ttf; do
   if [ -f "$FONTS/$name" ]; then

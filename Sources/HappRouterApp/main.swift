@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import Security
 import CoreText
+import AppKit
 
 private enum AppFont {
     static func regular(_ size: CGFloat) -> Font { .custom("Gilroy-Regular", size: size) }
@@ -69,7 +70,8 @@ private struct BackendResult: Decodable {
 }
 
 private enum Backend {
-    static func run(_ command: String, input: String? = nil, expires: Int? = nil) throws -> Data {
+    static func run(_ command: String, input: String? = nil, expires: Int? = nil,
+                    tag: String? = nil) throws -> Data {
         let script: URL
         if let resource = Bundle.main.resourceURL?.appendingPathComponent("routerctl.py"),
            FileManager.default.fileExists(atPath: resource.path) {
@@ -84,7 +86,8 @@ private enum Backend {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [script.path, command] + (input == nil ? [] : ["--url", "-"]) +
-            (expires.map { ["--expires", String($0)] } ?? [])
+            (expires.map { ["--expires", String($0)] } ?? []) +
+            (tag.map { ["--tag", $0] } ?? [])
         let output = Pipe()
         let error = Pipe()
         process.standardOutput = output
@@ -137,6 +140,7 @@ private enum SecretStore {
 private final class DashboardModel: ObservableObject {
     @Published var status: RouterStatus?
     @Published var previewNodes: [Node] = []
+    @Published var selectedNodeTag = ""
     @Published var subscription = SecretStore.read()
     @Published var showSubscription = false
     @Published var busy = false
@@ -160,6 +164,11 @@ private final class DashboardModel: ObservableObject {
             defer { refreshing = false }
             do {
                 let data = try await Task.detached(priority: .utility) { try Backend.run("status") }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                guard result.ok else {
+                    message = result.error ?? "Router durumu okunamadı"
+                    return
+                }
                 let newStatus = try JSONDecoder().decode(RouterStatus.self, from: data)
                 let now = Date()
                 for device in newStatus.devices {
@@ -236,45 +245,59 @@ private final class DashboardModel: ObservableObject {
     }
 
     func preview() {
-        let url = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !url.isEmpty else { message = "Abonelik adresini girin"; return }
+        let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !profile.isEmpty else { message = "Sunucu profilini girin"; return }
         busy = true
-        message = "Abonelik bağlantıları okunuyor…"
+        message = "Sunucu profilleri okunuyor…"
         Task {
             defer { busy = false }
             do {
-                let data = try await Task.detached(priority: .utility) { try Backend.run("preview", input: url) }.value
+                let data = try await Task.detached(priority: .utility) { try Backend.run("preview", input: profile) }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
                 if result.ok {
                     previewNodes = result.nodes ?? []
-                    SecretStore.write(url)
-                    message = "\(result.count ?? 0) profil bulundu. Ulaşılabilirlik router'a kurulduktan sonra ölçülür."
-                } else { message = result.error ?? "Abonelik okunamadı" }
+                    selectedNodeTag = previewNodes.first?.tag ?? ""
+                    SecretStore.write(profile)
+                    message = "\(result.count ?? 0) Shadowsocks sunucusu bulundu. Kurulumdan önce gerçek VPN çıkışı test edilecek."
+                } else { message = result.error ?? "Profil okunamadı" }
             } catch { message = error.localizedDescription }
         }
     }
 
     func apply() {
-        let url = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !url.isEmpty else { message = "Abonelik adresini girin"; return }
+        let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !profile.isEmpty else { message = "Sunucu profilini girin"; return }
         busy = true
-        message = "Router yapılandırması doğrulanıyor ve yükleniyor…"
+        message = "Yeni sunucu ayrı bağlantıda test ediliyor…"
         Task {
             defer { busy = false }
             do {
                 let expiry = expiryEpoch
+                let tag = selectedNodeTag
                 let data = try await Task.detached(priority: .utility) {
-                    try Backend.run("apply", input: url, expires: expiry)
+                    try Backend.run("apply", input: profile, expires: expiry, tag: tag)
                 }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
                 if result.ok {
-                    SecretStore.write(url)
-                    message = "\(result.count ?? 0) profil kuruldu. VPN yeniden başlıyor; bu birkaç dakika sürebilir."
+                    SecretStore.write(profile)
+                    exitIP = result.exitIP
+                    message = "Yeni sunucu çalışıyor. VPN çıkış IP: \(result.exitIP ?? "doğrulandı")"
                     previewNodes = []
                     refresh()
                 } else { message = result.error ?? "Kurulum başarısız" }
             } catch { message = error.localizedDescription }
         }
+    }
+
+    func pasteProfile() {
+        guard let value = NSPasteboard.general.string(forType: .string), !value.isEmpty else {
+            message = "Panoda metin bulunamadı"
+            return
+        }
+        subscription = value
+        previewNodes = []
+        selectedNodeTag = ""
+        message = "Profil panodan alındı. Önce kontrol edin."
     }
 
     func saveExpiry() {
@@ -434,7 +457,7 @@ private struct ContentView: View {
     private var statusPill: some View {
         let direct = model.status?.mode == "direct"
         let running = model.status?.vpnRunning == true
-        return Label(direct ? "Normal internet" : (running ? "Xray çalışıyor" : "Kontrol ediliyor"),
+        return Label(direct ? "Normal internet" : (running ? "VPN çalışıyor" : "Kontrol ediliyor"),
                      systemImage: direct ? "network" : (running ? "checkmark.shield.fill" : "hourglass"))
             .font(AppFont.semiBold(12))
             .foregroundStyle(direct ? Color.blue : (running ? Color.green : Color.orange))
@@ -508,7 +531,7 @@ private struct ContentView: View {
                          caption: "Son açılıştan beri", symbol: "network")
                 StatCard(title: "VPN trafiği", value: model.status?.vpnBytes == nil ? "—" :
                          bytes((model.status?.vpnBytes?.rx ?? 0) + (model.status?.vpnBytes?.tx ?? 0)),
-                         caption: "Xray başladığından beri", symbol: "arrow.up.arrow.down")
+                         caption: "VPN başladığından beri", symbol: "arrow.up.arrow.down")
                 StatCard(title: "Çalışma süresi", value: uptimeText,
                          caption: "Router son açılıştan beri", symbol: "clock")
             }
@@ -518,14 +541,14 @@ private struct ContentView: View {
                     LabeledContent("Router adresi", value: "192.168.1.1")
                     LabeledContent("Wi-Fi ağı", value: "HappVPN")
                     LabeledContent("İnternet modu", value: model.status?.mode == "direct" ? "Doğrudan" : "VPN")
-                    LabeledContent("Xray", value: model.status?.vpnRunning == true ? "Çalışıyor" : "Kontrol ediliyor")
+                    LabeledContent("Shadowsocks", value: model.status?.vpnRunning == true ? "Çalışıyor" : "Kontrol ediliyor")
                     Button("Durumu yenile") { model.refresh() }.disabled(model.busy)
                 }
             }
             sectionPanel {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Router kurulumu").font(AppFont.bold(18))
-                    Text("Mac'i router LAN portuna bağla. Kurulum, mevcut OpenWrt ve Xray üzerinde ölçüm, kullanım ve abonelik süresi görevlerini yükler. VPN ayarlarını değiştirmez.")
+                    Text("Mac'i router LAN portuna bağla. Kurulum, mevcut OpenWrt ve Shadowsocks üzerinde ölçüm, kullanım ve abonelik süresi görevlerini yükler. VPN ayarlarını değiştirmez.")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
                     Button("Gerekli yardımcıları yükle") { model.install() }
                         .disabled(model.busy)
@@ -557,7 +580,7 @@ private struct ContentView: View {
                     Spacer()
                     Button("Günlükleri yenile") { model.loadLogs() }
                 }
-                Text("Test başarısız olduğunda router'ın son Xray olayları burada görünür.")
+                Text("Test başarısız olduğunda router'ın son VPN olayları burada görünür.")
                     .font(AppFont.regular(12)).foregroundStyle(.secondary)
                 if !model.logs.isEmpty {
                     ScrollView([.horizontal, .vertical]) {
@@ -641,7 +664,7 @@ private struct ContentView: View {
                 .font(AppFont.regular(12)).foregroundStyle(.secondary)
             Text("Bu ms değeri yalnızca sunucunun TCP erişimini ölçer. Gerçek VPN bağlantısı için çıkış IP testinin başarılı olması gerekir. Otomatik sunucu değişimi şu anda etkin değil.")
                 .font(AppFont.regular(11)).foregroundStyle(.secondary)
-            let nodes = model.status?.nodes ?? model.previewNodes
+            let nodes = model.previewNodes.isEmpty ? (model.status?.nodes ?? []) : model.previewNodes
             if nodes.isEmpty {
                 Text("Henüz sunucu listesi kurulmadı.")
                     .foregroundStyle(.secondary).padding(.vertical, 12)
@@ -711,8 +734,8 @@ private struct ContentView: View {
     private var subscriptionSection: some View {
         sectionPanel {
             VStack(alignment: .leading, spacing: 13) {
-                Text("Abonelik").font(AppFont.bold(18))
-                Text("Yeni HTTPS abonelik adresini önce kontrol et, sonra router'a kur.")
+                Text("Happ sunucusunu değiştir").font(AppFont.bold(18))
+                Text("Happ uygulamasında çalışan sunucuyu seçip “Copy Server JSON” ile kopyala. Buraya yapıştır, kontrol et ve router'a kur. ss:// bağlantısı veya Shadowsocks içeren HTTPS aboneliği de kullanılabilir. Şifreli happ:// adresi önce Happ içinde açılmalıdır.")
                     .font(AppFont.regular(12)).foregroundStyle(.secondary)
                 HStack {
                     DatePicker("Bitiş günü", selection: $model.expiration, displayedComponents: .date)
@@ -727,19 +750,35 @@ private struct ContentView: View {
                 HStack {
                     Group {
                         if model.showSubscription {
-                            TextField("https://…", text: $model.subscription)
+                            TextEditor(text: $model.subscription)
+                                .font(AppFont.regular(12))
+                                .frame(height: 92)
+                                .overlay(RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.25)))
                         } else {
-                            SecureField("https://…", text: $model.subscription)
+                            SecureField("Sunucu JSON, ss:// veya HTTPS", text: $model.subscription)
+                                .textFieldStyle(.roundedBorder)
                         }
                     }
-                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: model.subscription) { _, _ in
+                        model.previewNodes = []
+                        model.selectedNodeTag = ""
+                    }
                     Button(model.showSubscription ? "Gizle" : "Göster") {
                         model.showSubscription.toggle()
                     }
+                    Button("Panodan al") { model.pasteProfile() }
+                }
+                if model.previewNodes.count > 1 {
+                    Picker("Kurulacak sunucu", selection: $model.selectedNodeTag) {
+                        ForEach(model.previewNodes) { node in
+                            Text(node.name).tag(node.tag)
+                        }
+                    }
                 }
                 HStack(spacing: 10) {
-                    Button("Profilleri kontrol et") { model.preview() }.disabled(model.busy)
-                    Button("Router'a kur") { model.apply() }
+                    Button("Profili kontrol et") { model.preview() }.disabled(model.busy)
+                    Button("Sunucuyu değiştir") { model.apply() }
                         .disabled(model.busy || model.previewNodes.isEmpty)
                         .buttonStyle(.borderedProminent)
                 }

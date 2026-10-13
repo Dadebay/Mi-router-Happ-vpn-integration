@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Local SSH controller for a Xiaomi 4C running OpenWrt and Xray.
+"""Local SSH controller for the Xiaomi 4C Shadowsocks VPN gateway.
 
-Never prints the subscription URL or proxy credentials. All router writes use a
-staged file, Xray syntax validation, and a saved last-good configuration.
+Never prints subscription URLs or proxy credentials. A new server is tested on
+a separate listener before it replaces the saved working configuration.
 """
 import argparse
 import base64
@@ -14,7 +14,6 @@ import socket
 import ssl
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -24,7 +23,13 @@ HOME = Path.home() / '.happ-router'
 HOST = '192.168.1.1'
 SSH_KEY = HOME / 'router_rsa'
 KNOWN_HOSTS = HOME / 'known_hosts'
-ROUTER_SCRIPTS = ('mode.sh', 'expiry-check.sh', 'probe-nodes.lua', 'usage-sample.lua')
+ROUTER_SCRIPTS = ('mode.sh', 'expiry-check.sh', 'probe-nodes.lua', 'usage-sample.lua',
+                  'dns-relay.lua')
+SUPPORTED_CIPHERS = frozenset({
+    'aes-128-gcm', 'aes-192-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305',
+    'xchacha20-ietf-poly1305', 'aes-128-cfb', 'aes-192-cfb', 'aes-256-cfb',
+    'aes-128-ctr', 'aes-192-ctr', 'aes-256-ctr', 'chacha20-ietf', 'salsa20',
+})
 CRON_ENTRIES = (
     '*/5 * * * * /etc/happvpn/expiry-check.sh',
     '* * * * * /etc/happvpn/usage-sample.lua',
@@ -69,19 +74,17 @@ def install_helpers():
     board = json.loads(ssh('ubus call system board').decode('utf-8'))
     if board.get('board_name') != 'xiaomi,mi-router-4c':
         raise RuntimeError('Bu kurulum yalnızca Xiaomi Mi Router 4C için hazırlanmıştır.')
-    requirements = ssh("for cmd in xray lua5.3 nft iw uci; do command -v \"$cmd\" >/dev/null || echo \"$cmd\"; done; "
+    requirements = ssh("for cmd in ss-local ss-redir lua5.3 nft iw uci; do command -v \"$cmd\" >/dev/null || echo \"$cmd\"; done; "
                        "lua5.3 -e 'require(\"socket\")' >/dev/null 2>&1 || echo lua-socket; "
-                       "test -s /etc/xray/config.json || echo xray-config; "
-                       "test -s /etc/happvpn/happvpn.nft.vpn || echo vpn-firewall-backup; "
-                       "test -s /etc/nftables.d/happvpn.nft || echo vpn-firewall; "
-                       "test -s /etc/happvpn/dns-relay.lua || echo dns-relay; "
-                       "test -x /etc/init.d/xray || echo xray-service",
+                       "test -s /etc/happvpn/ss-client.json || echo ss-client-config; "
+                       "test -s /etc/nftables.d/happvpn.nft || echo vpn-firewall",
                        timeout=20).decode('utf-8').splitlines()
     if requirements:
         raise RuntimeError('Router hazırlığı eksik: ' + ', '.join(requirements) +
-                           '. OpenWrt/Xray temel kurulumu gerekli; çalışan ağ ayarları değiştirilmedi.')
+                           '. OpenWrt/Shadowsocks temel kurulumu gerekli; çalışan ağ ayarları değiştirilmedi.')
     source = script_directory()
-    missing = [name for name in ROUTER_SCRIPTS if not (source / name).is_file()]
+    missing = [name for name in (*ROUTER_SCRIPTS, 'happ-ss.init', 'happ-ss.nft')
+               if not (source / name).is_file()]
     if missing:
         raise RuntimeError('Uygulama kurulum dosyaları eksik: ' + ', '.join(missing))
     ssh('umask 077; mkdir -p /etc/happvpn; test -d /etc/happvpn', timeout=20)
@@ -91,6 +94,12 @@ def install_helpers():
             f'chmod 755 /etc/happvpn/.{name}.new && '
             f'mv /etc/happvpn/.{name}.new /etc/happvpn/{name}',
             stdin=content, timeout=20)
+    ssh('umask 077; cat > /etc/happvpn/happvpn.nft.vpn.ss && '
+        'chmod 600 /etc/happvpn/happvpn.nft.vpn.ss',
+        stdin=(source / 'happ-ss.nft').read_bytes(), timeout=20)
+    ssh('umask 077; cat > /etc/init.d/happ-ss && chmod 755 /etc/init.d/happ-ss && '
+        '/etc/init.d/happ-ss enable',
+        stdin=(source / 'happ-ss.init').read_bytes(), timeout=20)
     # Keep user-defined cron jobs and replace only the entries owned by HappRouter.
     existing = ssh('crontab -l 2>/dev/null || true', timeout=20).decode('utf-8').splitlines()
     retained = [line for line in existing if not any('/etc/happvpn/' + name in line
@@ -102,15 +111,15 @@ def install_helpers():
         stdin=cron.encode('utf-8'), timeout=30)
     # Direct mode stays active until a real VPN exit test succeeds.
     emit({'ok': True, 'note': 'Router yardımcıları ve ölçüm görevleri kuruldu. '
-          'Aboneliği ekleyip gerçek VPN çıkış testini çalıştırın.'})
+          'Yeni sunucuyu eklemeden önce profili kontrol edin.'})
 
 
 def diagnostics():
     command = ("printf '== Sistem ==\\n'; ubus call system board | grep -E 'model|version' | head -n 3; "
-               "printf '\\n== Mod / Xray ==\\n'; cat /etc/happvpn/mode 2>/dev/null || true; "
-               "printf '\\n'; netstat -lnt 2>/dev/null | grep ':1080 ' || true; "
-               "printf '\\n== Son Xray / HappRouter olayları ==\\n'; "
-               "logread 2>/dev/null | grep -E 'daemon\\..*xray|happvpn:' | tail -n 35")
+               "printf '\\n== Mod / Shadowsocks ==\\n'; cat /etc/happvpn/mode 2>/dev/null || true; "
+               "printf '\\n'; netstat -lnt 2>/dev/null | grep -E ':1080 |:12345 ' || true; "
+               "printf '\\n== Son VPN olayları ==\\n'; "
+               "logread 2>/dev/null | grep -E 'ss-local|ss-redir|happ-ss|happvpn:' | tail -n 35")
     output = ssh(command, timeout=25).decode('utf-8', 'replace')[-12000:]
     output = re.sub(r'https?://[^\s]+', '[adres gizlendi]', output)
     output = re.sub(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}\b', '[kimlik gizlendi]', output)
@@ -126,164 +135,183 @@ def fetch_subscription(url):
         with urllib.request.urlopen(request, timeout=20) as response:
             raw = response.read(512 * 1024 + 1)
     except Exception as exc:
-        raise RuntimeError('Abonelik adresi okunamadı. Adresi ve internet bağlantısını kontrol edin.') from exc
+        raise RuntimeError('Abonelik adresi okunamadı. İnternet bağlantısını kontrol edin.') from exc
     if len(raw) > 512 * 1024:
         raise ValueError('Abonelik yanıtı çok büyük.')
     text = raw.decode('utf-8', 'replace').strip()
-    if not text.startswith('vless://'):
+    if not any(line.strip().startswith(('ss://', 'vless://')) for line in text.splitlines()):
         try:
-            text = base64.b64decode(text + '=' * (-len(text) % 4), validate=True).decode('utf-8')
-        except (ValueError, UnicodeError) as exc:
-            raise ValueError('Abonelik VLESS bağlantı listesi içermiyor.') from exc
+            compact = ''.join(text.split())
+            decoded = base64.b64decode(compact + '=' * (-len(compact) % 4),
+                                       altchars=b'-_', validate=True).decode('utf-8')
+            if '://' in decoded:
+                text = decoded
+        except (ValueError, UnicodeError):
+            pass
     return text
 
 
-def parse_subscription(text):
-    nodes = []
-    outbounds = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith('vless://'):
-            continue
-        uri = urllib.parse.urlsplit(line)
-        q = urllib.parse.parse_qs(uri.query, keep_blank_values=True)
-        first = lambda key, default='': q.get(key, [default])[0]
-        if first('type') != 'ws' or first('security') != 'tls':
-            continue
-        if not uri.hostname or not uri.port or not uri.username:
-            continue
-        tag = f'node-{len(nodes):02d}'
-        name = urllib.parse.unquote(uri.fragment) or tag
-        tls = {'serverName': first('sni', uri.hostname), 'allowInsecure': False,
-               'maxVersion': '1.2'}
-        if first('alpn'):
-            tls['alpn'] = first('alpn').split(',')
-        # This MIPS router stalls on modern TLS handshakes. The provider's
-        # WS/TLS endpoint was verified with TLS 1.2 and no uTLS fingerprint.
-        ws = {'path': first('path', '/')}
-        if first('host'):
-            ws['headers'] = {'Host': first('host')}
-        outbounds.append({
-            'tag': tag, 'protocol': 'vless',
-            'settings': {'vnext': [{'address': uri.hostname, 'port': uri.port,
-                                    'users': [{'id': urllib.parse.unquote(uri.username), 'encryption': 'none'}]}]},
-            'streamSettings': {'network': 'ws', 'security': 'tls',
-                               'tlsSettings': tls, 'wsSettings': ws},
-        })
-        nodes.append({'tag': tag, 'name': name, 'address': uri.hostname, 'port': uri.port,
-                      'country': name[:2] if name[:1] in ('🇹', '🇪', '🇵', '🇫', '🇷') else ''})
-    if not nodes:
-        raise ValueError('Desteklenen VLESS WebSocket/TLS profili bulunamadı.')
-    return nodes, outbounds
+def _base64_text(value):
+    try:
+        return base64.b64decode(value + '=' * (-len(value) % 4),
+                                altchars=b'-_', validate=True).decode('utf-8')
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError('Shadowsocks bağlantı biçimi geçersiz.') from exc
 
 
-def build_config(base, outbound):
-    fallback = next((item for item in base.get('outbounds', []) if item.get('tag') == 'happ-vpn'), None)
-    if not fallback:
-        raise ValueError('Happ VPN yedek profili bulunamadı; mevcut bağlantı korunuyor.')
-    config = dict(base)
-    config['inbounds'] = [item for item in base.get('inbounds', [])
-                          if item.get('tag') in ('socks', 'tproxy', 'dns-in')]
-    config['outbounds'] = [outbound, fallback]
-    config['routing'] = {
-        'domainStrategy': 'AsIs',
-        'rules': [
-            {'type': 'field', 'inboundTag': ['socks', 'tproxy', 'dns-in'],
-             'outboundTag': outbound['tag']}],
-    }
-    for key in ('observatory', 'metrics', 'stats', 'policy'):
-        config.pop(key, None)
-    config['log'] = {'loglevel': 'warning'}
-    return config
+def _validated_server(address, port, method, password):
+    if not isinstance(address, str) or not re.fullmatch(r'[A-Za-z0-9.:-]{1,253}', address):
+        raise ValueError('Sunucu adresi geçersiz.')
+    if address in ('0.0.0.0', '127.0.0.1', '::1'):
+        raise ValueError('Yerel adres VPN sunucusu olamaz.')
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError('Sunucu portu geçersiz.')
+    if method not in SUPPORTED_CIPHERS:
+        raise ValueError('Bu Shadowsocks şifreleme yöntemi router tarafından desteklenmiyor.')
+    if not isinstance(password, str) or not 1 <= len(password) <= 512:
+        raise ValueError('Sunucu parolası geçersiz.')
+    return {'server': address, 'server_port': port, 'password': password,
+            'method': method, 'local_address': '127.0.0.1', 'local_port': 1080,
+            'timeout': 30}
 
 
-def node_preview(url):
-    nodes, outbounds = parse_subscription(fetch_subscription(url))
-    emit({'ok': True, 'count': len(nodes), 'nodes': nodes,
-          'note': 'Bağlantı adresleri okundu. Gerçek ms testi router tarafından yapılır.'})
-    return nodes, outbounds
+def _parse_ss_uri(value):
+    if not value.startswith('ss://'):
+        raise ValueError('Shadowsocks bağlantısı ss:// ile başlamalı.')
+    body, _, fragment = value[5:].partition('#')
+    authority, _, query = body.partition('?')
+    if urllib.parse.parse_qs(query).get('plugin'):
+        raise ValueError('Eklenti kullanan Shadowsocks sunucusu desteklenmiyor.')
+    if '@' not in authority:
+        authority = _base64_text(authority)
+    if '@' not in authority:
+        raise ValueError('Shadowsocks bağlantı biçimi geçersiz.')
+    credentials, host_port = authority.rsplit('@', 1)
+    credentials = urllib.parse.unquote(credentials)
+    if ':' not in credentials:
+        credentials = _base64_text(credentials)
+    if ':' not in credentials:
+        raise ValueError('Shadowsocks kimlik bilgileri geçersiz.')
+    method, password = credentials.split(':', 1)
+    host = urllib.parse.urlsplit('ss://' + host_port)
+    try:
+        port = host.port
+    except ValueError as exc:
+        raise ValueError('Shadowsocks portu geçersiz.') from exc
+    config = _validated_server(host.hostname, port, method, password)
+    name = urllib.parse.unquote(fragment) or host.hostname
+    return name, config
 
 
-def install_subscription(url, expires_at):
+def parse_profiles(source):
+    source = source.strip()
+    if len(source) > 512 * 1024:
+        raise ValueError('Profil çok büyük.')
+    if source.startswith('happ://'):
+        raise ValueError('Şifreli Happ bağlantısını router açamıyor. Happ içinden "Copy Server JSON" ile sunucuyu kopyalayın.')
+    if source.startswith('https://'):
+        source = fetch_subscription(source)
+    entries = []
+    if source.startswith('{'):
+        try:
+            document = json.loads(source)
+        except json.JSONDecodeError as exc:
+            raise ValueError('Sunucu JSON biçimi geçersiz.') from exc
+        if not isinstance(document, dict):
+            raise ValueError('Sunucu JSON biçimi geçersiz.')
+        remarks = document.get('remarks')
+        for outbound in document.get('outbounds', []):
+            if not isinstance(outbound, dict) or outbound.get('protocol') != 'shadowsocks':
+                continue
+            for server in outbound.get('settings', {}).get('servers', []):
+                if not isinstance(server, dict):
+                    continue
+                config = _validated_server(server.get('address'), server.get('port'),
+                                           server.get('method'), server.get('password'))
+                entries.append((remarks if isinstance(remarks, str) else 'Happ sunucusu', config))
+    else:
+        for line in source.splitlines():
+            line = line.strip()
+            if line.startswith('ss://'):
+                entries.append(_parse_ss_uri(line))
+    if not entries:
+        raise ValueError('Desteklenen Shadowsocks sunucusu bulunamadı. Happ içinden "Copy Server JSON" kullanın.')
+    if len(entries) > 200:
+        raise ValueError('Profil listesi çok büyük.')
+    profiles = []
+    for index, (name, config) in enumerate(entries):
+        clean_name = re.sub(r'[\x00-\x1f\x7f]+', ' ', name).strip()[:80] or 'Happ sunucusu'
+        node = {'tag': f'ss-{index:02d}', 'name': clean_name,
+                'address': config['server'], 'port': config['server_port'], 'country': ''}
+        profiles.append((node, config))
+    return profiles
+
+
+def node_preview(source):
+    profiles = parse_profiles(source)
+    emit({'ok': True, 'count': len(profiles), 'nodes': [node for node, _ in profiles],
+          'note': 'Sunucu profilleri okundu. Gerçek VPN testi kurulumdan önce yapılır.'})
+
+
+def _cleanup_candidate():
+    try:
+        ssh('rm -f /tmp/happ-ss-candidate.json /tmp/happ-ss-candidate.log', timeout=15)
+    except Exception:
+        pass
+
+
+def install_profile(source, expires_at, selected_tag=None):
     if not isinstance(expires_at, int) or expires_at < int(time.time()):
         raise ValueError('Gelecekteki abonelik bitiş tarihini seçin.')
-    nodes, outbounds = parse_subscription(fetch_subscription(url))
-    base = json.loads(ssh('cat /etc/xray/config.json').decode('utf-8'))
-    # Xray observatory with every profile exhausts this router's 64 MB RAM.
-    # Install one profile; the separate lightweight probe keeps the full list visible.
-    chosen = outbounds[0]
-    candidate = build_config(base, chosen)
-    validator = Path(__file__).parent / 'xray-validator'
-    if not validator.exists():
-        validator = Path(__file__).parent.parent / 'Tools' / 'xray-validator'
-    if not validator.exists():
-        raise RuntimeError('Xray doğrulama aracı bulunamadı; çalışan yapılandırma korunuyor.')
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', prefix='happvpn-', delete=True) as file:
-        os.chmod(file.name, 0o600)
-        json.dump(candidate, file, ensure_ascii=False)
-        file.flush()
-        validation = subprocess.run([str(validator), 'run', '-test', '-config', file.name,
-                                     '-format', 'json'], capture_output=True, timeout=30)
-        if validation.returncode:
-            raise RuntimeError('Xray yapılandırması geçersiz; çalışan bağlantı korunuyor.')
-    ssh('umask 077; cat > /tmp/happvpn-candidate.json',
-        stdin=json.dumps(candidate, ensure_ascii=False).encode('utf-8'))
-    ssh('umask 077; cat > /tmp/happvpn-nodes.json',
-        stdin=json.dumps(nodes, ensure_ascii=False).encode('utf-8'))
-    probes = ''.join(f"{node['tag']}\t{node['address']}\t{node['port']}\n"
-                     for node in nodes)
-    ssh('umask 077; cat > /tmp/happvpn-probes.tsv', stdin=probes.encode('utf-8'))
-    ssh('umask 077; cat > /tmp/happvpn-subscription-url', stdin=url.encode('utf-8'))
-    ssh('umask 077; cat > /tmp/happvpn-expires-at', stdin=str(expires_at).encode('ascii'))
-    # Keep client internet available while this small router starts Xray.
-    ssh('/etc/happvpn/mode.sh direct', timeout=45)
+    profiles = parse_profiles(source)
+    if len(profiles) > 1 and not selected_tag:
+        raise ValueError('Kurulacak sunucuyu listeden seçin.')
+    chosen = next(((node, config) for node, config in profiles
+                   if node['tag'] == (selected_tag or 'ss-00')), None)
+    if not chosen:
+        raise ValueError('Seçilen sunucu bu profilde bulunamadı.')
+    node, config = chosen
+    ssh('umask 077; cat > /tmp/happ-ss-candidate.json',
+        stdin=json.dumps(config, ensure_ascii=False).encode('utf-8'))
+    # Probe the new server without interrupting the working listener or clients.
     try:
-        ssh('cp /etc/xray/config.json /etc/xray/config.json.last-good && '
-            'cp /tmp/happvpn-candidate.json /etc/xray/config.json && '
-            'chmod 600 /etc/xray/config.json && /etc/init.d/xray restart', timeout=45)
-        deadline = time.monotonic() + 30 * 60
-        last_error = None
-        failed_tests = 0
-        while time.monotonic() < deadline:
-            ready = 'starting'
-            try:
-                ready = ssh("netstat -lnt | grep -q ':1080 ' && echo ready || echo starting",
-                            timeout=25).decode('ascii', 'replace').strip()
-                if ready == 'ready':
-                    active_test(emit_result=False)
-                    break
-            except Exception as exc:
-                last_error = exc
-                if ready == 'ready':
-                    failed_tests += 1
-                    if failed_tests >= 3:
-                        raise RuntimeError('Yeni VPN çıkışı üç denemede doğrulanamadı.') from exc
-            time.sleep(20)
-        else:
-            raise RuntimeError('Yeni VPN 30 dakika içinde doğrulanamadı.') from last_error
-        ssh('cp /tmp/happvpn-nodes.json /etc/happvpn/nodes.json && '
-            'chmod 600 /etc/happvpn/nodes.json && '
-            'cp /tmp/happvpn-probes.tsv /etc/happvpn/probes.tsv && '
-            'chmod 600 /etc/happvpn/probes.tsv && '
-            f"printf {chosen['tag']} > /etc/happvpn/active-outbound && "
-            'cp /tmp/happvpn-subscription-url /etc/happvpn/subscription-url && '
-            'chmod 600 /etc/happvpn/subscription-url && '
-            'cp /tmp/happvpn-expires-at /etc/happvpn/expires-at && '
-            'chmod 600 /etc/happvpn/expires-at && '
-            '/etc/happvpn/mode.sh vpn', timeout=45)
+        ssh('ss-local -c /tmp/happ-ss-candidate.json -b 127.0.0.1 -l 11082 '
+            '-f /tmp/happ-ss-candidate.pid >/tmp/happ-ss-candidate.log 2>&1', timeout=15)
+        active_test(emit_result=False, remote_port=11082)
     except Exception as exc:
-        try:
-            ssh('cp /etc/xray/config.json.last-good /etc/xray/config.json && '
-                '/etc/init.d/xray restart', timeout=45)
-        except Exception:
-            pass
-        raise RuntimeError('Yeni yapılandırma doğrulanamadı; önceki yapılandırma geri yüklendi. '
-                           'Router doğrudan internet modunda kaldı.') from exc
-    emit({'ok': True, 'count': len(nodes), 'note': 'Abonelik doğrulandı; VPN modu açıldı.'})
+        _cleanup_candidate()
+        raise RuntimeError('Yeni sunucunun VPN çıkışı doğrulanamadı; çalışan profil korundu.') from exc
+    finally:
+        ssh('if [ -s /tmp/happ-ss-candidate.pid ]; then '
+            'kill $(cat /tmp/happ-ss-candidate.pid) 2>/dev/null || true; '
+            'rm -f /tmp/happ-ss-candidate.pid; fi', timeout=15)
+    ssh('cp /etc/happvpn/ss-client.json /etc/happvpn/ss-client.json.last-good')
+    try:
+        ssh('cp /tmp/happ-ss-candidate.json /etc/happvpn/ss-client.json && '
+            'chmod 600 /etc/happvpn/ss-client.json && '
+            '/etc/init.d/happ-ss restart', timeout=30)
+        exit_ip = active_test(emit_result=False)
+    except Exception as exc:
+        ssh('cp /etc/happvpn/ss-client.json.last-good /etc/happvpn/ss-client.json && '
+            '/etc/init.d/happ-ss restart', timeout=30)
+        _cleanup_candidate()
+        raise RuntimeError('Yeni profil açılamadı; önceki çalışan profil geri yüklendi.') from exc
+    nodes = [item for item, _ in profiles]
+    probes = ''.join(f"{item['tag']}\t{item['address']}\t{item['port']}\n"
+                     for item in nodes)
+    ssh('umask 077; cat > /etc/happvpn/nodes.json',
+        stdin=json.dumps(nodes, ensure_ascii=False).encode('utf-8'))
+    ssh('umask 077; cat > /etc/happvpn/probes.tsv', stdin=probes.encode('utf-8'))
+    ssh('umask 077; cat > /etc/happvpn/active-outbound', stdin=node['tag'].encode('ascii'))
+    ssh('umask 077; cat > /etc/happvpn/expires-at', stdin=str(expires_at).encode('ascii'))
+    ssh('/etc/happvpn/mode.sh vpn', timeout=45)
+    _cleanup_candidate()
+    emit({'ok': True, 'count': len(profiles), 'exitIP': exit_ip,
+          'note': 'Yeni sunucu router üzerinde doğrulandı ve kullanıma alındı.'})
 
 
 def status():
-    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; wget -T 3 -qO- http://127.0.0.1:11111/debug/vars 2>/dev/null; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; netstat -lnt | grep -q ':1080 ' && echo ready || echo starting; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
+    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; if netstat -lnt | grep -q ':1080 ' && netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
     raw = ssh(command, timeout=35).decode('utf-8', 'replace')
     sections = {}
     pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|PROBES|METRICS|NODES|ACTIVE|SYSTEM)__\n', raw)
@@ -399,7 +427,7 @@ def set_mode(mode):
     emit({'ok': True, 'note': 'Router internet modu değiştirildi.', 'mode': mode})
 
 
-def active_test(emit_result=True):
+def active_test(emit_result=True, remote_port=1080):
     # A tunnel through the router's SOCKS listener verifies the real VPN exit.
     setup()
     with socket.socket() as reservation:
@@ -408,7 +436,7 @@ def active_test(emit_result=True):
     ssh_args = ['/usr/bin/ssh', '-i', str(SSH_KEY), '-o', 'BatchMode=yes',
                 '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=yes',
                 '-o', f'UserKnownHostsFile={KNOWN_HOSTS}', '-N',
-                '-L', f'{local_port}:127.0.0.1:1080', f'root@{HOST}']
+                '-L', f'{local_port}:127.0.0.1:{remote_port}', f'root@{HOST}']
     proc = subprocess.Popen(ssh_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         deadline = time.monotonic() + 30
@@ -422,7 +450,7 @@ def active_test(emit_result=True):
                 if time.monotonic() > deadline:
                     raise RuntimeError('SSH tüneli zaman aşımına uğradı.')
                 time.sleep(0.5)
-        # TLS on the 64 MB MIPS router can need longer while Xray settles.
+        # Keep a bounded timeout for a new endpoint's TLS response.
         s.settimeout(60)
         s.sendall(b'\x05\x01\x00')
         if s.recv(2) != b'\x05\x00':
@@ -463,6 +491,7 @@ def main():
                                             'mode-vpn', 'mode-direct', 'install', 'logs'])
     parser.add_argument('--url')
     parser.add_argument('--expires', type=int)
+    parser.add_argument('--tag')
     args = parser.parse_args()
     try:
         if args.command == 'status':
@@ -478,7 +507,7 @@ def main():
             if args.command == 'preview':
                 node_preview(url)
             else:
-                install_subscription(url, args.expires)
+                install_profile(url, args.expires, args.tag)
         elif args.command == 'test':
             active_test()
         elif args.command == 'expiry':
