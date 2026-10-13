@@ -1373,7 +1373,8 @@ private struct ContentView: View {
         if device.type != "Wi-Fi" { return "cable.connector" }
         let name = (device.name ?? "").lowercased()
         if name.contains("iphone") || name.contains("android") || name.contains("galaxy")
-            || name.contains("xiaomi") || name.contains("redmi") || name.contains("pixel") { return "iphone" }
+            || name.contains("xiaomi") || name.contains("redmi") || name.contains("pixel")
+            || name.hasSuffix("-a34") || name == "a34" { return "iphone" }
         if name.contains("ipad") || name.contains("tablet") { return "ipad" }
         if name.contains("mac") || name.contains("book") || name.contains("pc") || name.contains("laptop") {
             return "laptopcomputer"
