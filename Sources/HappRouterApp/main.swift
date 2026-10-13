@@ -727,11 +727,26 @@ private enum AppPage: String, CaseIterable, Identifiable {
     }
     var symbol: String {
         switch self {
-        case .overview: "square.grid.2x2.fill"
-        case .vpn: "shield.lefthalf.filled"
-        case .router: "wifi.router.fill"
+        case .overview: "square.grid.2x2"
+        case .vpn: "shield"
+        case .router: "wifi.router"
         case .devices: "laptopcomputer.and.iphone"
         }
+    }
+}
+
+/// Başlık çubuğundaki yinelenen uygulama adını gizler; pencere kontrolleri kalır.
+private final class WindowTitleView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.titleVisibility = .hidden
+    }
+}
+
+private struct HiddenWindowTitle: NSViewRepresentable {
+    func makeNSView(context: Context) -> WindowTitleView { WindowTitleView() }
+    func updateNSView(_ view: WindowTitleView, context: Context) {
+        view.window?.titleVisibility = .hidden
     }
 }
 
@@ -776,6 +791,7 @@ private struct ContentView: View {
         .frame(minWidth: 960, minHeight: 680)
         .font(AppFont.regular(14))
         .tint(Theme.accent)
+        .background(HiddenWindowTitle().frame(width: 0, height: 0))
         .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
         .onAppear { model.refresh() }
         .onReceive(timer) { _ in model.refresh() }
@@ -791,32 +807,32 @@ private struct ContentView: View {
     // MARK: Çerçeve
 
     private var sidebar: some View {
-        List(selection: $selectedPage) {
-            ForEach(AppPage.allCases) { item in
-                Label(item.title, systemImage: item.symbol)
-                    .font(AppFont.medium(13))
-                    .tag(item)
-                    .padding(.vertical, 4)
-            }
-        }
-        .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 250)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "wifi.router.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(Theme.accent.gradient, in: RoundedRectangle(cornerRadius: 9))
-                VStack(alignment: .leading, spacing: 1) {
+                    .frame(width: 36, height: 36)
+                    .background(Theme.accent.gradient, in: RoundedRectangle(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 2) {
                     Text("HappRouter").font(AppFont.bold(15))
                     Text("Mi Router 4C").font(AppFont.regular(11)).foregroundStyle(.secondary)
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 20)
+
+            VStack(spacing: 4) {
+                ForEach(AppPage.allCases) { item in
+                    sidebarButton(item)
+                }
+            }
+            .padding(.horizontal, 12)
+
+            Spacer(minLength: 16)
+
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 4) {
                     appearanceButton("system", title: "Sistem", symbol: "display")
@@ -834,6 +850,35 @@ private struct ContentView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 250)
+    }
+
+    private func sidebarButton(_ item: AppPage) -> some View {
+        let selected = page == item
+        return Button { selectedPage = item } label: {
+            HStack(spacing: 11) {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(selected ? Theme.accent : Color.primary.opacity(0.8))
+                    .frame(width: 28, height: 28)
+                    .background(selected ? Theme.accent.opacity(0.12) : Color.primary.opacity(0.05),
+                                in: RoundedRectangle(cornerRadius: 8))
+                Text(item.title)
+                    .font(selected ? AppFont.semiBold(13) : AppFont.medium(13))
+                    .foregroundStyle(selected ? Theme.accent : Color.primary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Theme.accent.opacity(0.11) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func appearanceButton(_ value: String, title: String, symbol: String) -> some View {
