@@ -33,7 +33,7 @@ Shadowsocks sunucuları için TCP erişim testi 30 dakikada bir çalışır. Oto
 
 Uygulama router'a `192.168.1.1` adresinden SSH ile bağlanır. Yerel SSH anahtarını `~/.happ-router` altında kullanır. Mac'in Wi-Fi ayarlarını değiştirmez. Router'daki VPN ve süre dolumu görevi Mac kapalıyken çalışır.
 
-Happ macOS uygulamasında çalışan Shadowsocks sunucusunu seçip **Copy Server JSON** komutunu kullan. HappRouter'da **Panodan al**, **Profili kontrol et**, **Yeni sunucuyu test et** ve **Test et ve kur** düğmelerine bas. Profil kontrolü yalnızca biçimi okur; yeni test, router'daki mevcut profili değiştirmeden gerçek HTTPS çıkışını doğrular. Birden fazla sunucu için çoklu `ss://` profili veya Shadowsocks içeren HTTPS aboneliği ekle. Uygulama profilleri router'a kaydeder; VPN Ayarları içinden elle sunucu seçilebilir. Şifreli `happ://crypt5` bağlantıları doğrudan çözülemez; Happ içinden sunucu JSON'u alınmalıdır. Yalnızca VLESS veya Hysteria profilleri içeren abonelikler bu router üzerinde desteklenmez.
+Happ macOS uygulamasında çalışan Shadowsocks sunucusunu seçip **Copy Server JSON** komutunu kullan. HappRouter'da sırayla **Yapıştır**, **Sunucuları getir**, **Bağlantıyı test et** ve başarılıysa **Sunucuyu kur** düğmelerini kullan. Sunucuları getirmek yalnızca profili okur; bağlantı testi kurulu VPN'i değiştirmeden gerçek HTTPS çıkışını doğrular. Kurulum sırasında bağlantı yeniden doğrulanır. Birden fazla sunucu için çoklu `ss://` profili veya Shadowsocks içeren HTTPS aboneliği ekle. Şifreli `happ://crypt5` bağlantıları doğrudan çözülemez; Happ içinden sunucu JSON'u alınmalıdır. Yalnızca VLESS veya Hysteria profilleri içeren abonelikler bu router üzerinde desteklenmez.
 
 ## Geliştirme
 

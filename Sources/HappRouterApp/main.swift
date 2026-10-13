@@ -430,19 +430,24 @@ private final class DashboardModel: ObservableObject {
         let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !profile.isEmpty else { notify("Sunucu profilini girin", .warning); return }
         busy = true
+        previewNodes = []
+        selectedNodeTag = ""
+        candidateExitIP = nil
+        candidateError = nil
         notify("Sunucu profilleri okunuyor…")
         Task {
             defer { busy = false }
             do {
                 let data = try await Task.detached(priority: .utility) { try Backend.run("preview", input: profile) }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                guard subscription.trimmingCharacters(in: .whitespacesAndNewlines) == profile else { return }
                 if result.ok {
                     previewNodes = result.nodes ?? []
                     selectedNodeTag = previewNodes.first?.tag ?? ""
                     candidateExitIP = nil
                     candidateError = nil
                     SecretStore.write(profile)
-                    notify("\(result.count ?? 0) profil okundu. Bağlantıyı ayrıca test edin.", .info)
+                    notify("\(result.count ?? 0) sunucu getirildi. Şimdi bağlantıyı test edin.", .info)
                 } else { notify(result.error ?? "Profil okunamadı", .error) }
             } catch { notify(error.localizedDescription, .error) }
         }
@@ -451,6 +456,7 @@ private final class DashboardModel: ObservableObject {
     func probeProfile() {
         let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !profile.isEmpty, !selectedNodeTag.isEmpty, !busy else { return }
+        let tag = selectedNodeTag
         busy = true
         candidateExitIP = nil
         candidateError = nil
@@ -458,11 +464,12 @@ private final class DashboardModel: ObservableObject {
         Task {
             defer { busy = false }
             do {
-                let tag = selectedNodeTag
                 let data = try await Task.detached(priority: .utility) {
                     try Backend.run("profile-test", input: profile, tag: tag)
                 }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                guard subscription.trimmingCharacters(in: .whitespacesAndNewlines) == profile,
+                      selectedNodeTag == tag else { return }
                 if result.ok {
                     candidateExitIP = result.exitIP
                     notify("Yeni sunucu çalışıyor. Çıkış IP: \(result.exitIP ?? "doğrulandı")", .success)
@@ -472,6 +479,8 @@ private final class DashboardModel: ObservableObject {
                     notify(message, .error)
                 }
             } catch {
+                guard subscription.trimmingCharacters(in: .whitespacesAndNewlines) == profile,
+                      selectedNodeTag == tag else { return }
                 let message = error.localizedDescription
                 candidateError = message
                 notify(message, .error)
@@ -482,8 +491,12 @@ private final class DashboardModel: ObservableObject {
     func apply() {
         let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !profile.isEmpty else { notify("Sunucu profilini girin", .warning); return }
+        guard !selectedNodeTag.isEmpty, candidateExitIP != nil else {
+            notify("Önce seçilen sunucunun bağlantısını test edin.", .warning)
+            return
+        }
         busy = true
-        notify("Yeni sunucu ayrı bağlantıda test ediliyor…")
+        notify("Sunucu router'a kuruluyor ve yeniden doğrulanıyor…")
         Task {
             defer { busy = false }
             do {
@@ -498,6 +511,9 @@ private final class DashboardModel: ObservableObject {
                     exitIP = result.exitIP
                     notify("Yeni sunucu çalışıyor. VPN çıkış IP: \(result.exitIP ?? "doğrulandı")", .success)
                     previewNodes = []
+                    selectedNodeTag = ""
+                    candidateExitIP = nil
+                    candidateError = nil
                     refresh()
                 } else { notify(result.error ?? "Kurulum başarısız", .error) }
             } catch { notify(error.localizedDescription, .error) }
@@ -512,7 +528,7 @@ private final class DashboardModel: ObservableObject {
         subscription = value
         previewNodes = []
         selectedNodeTag = ""
-        notify("Profil panodan alındı. Şimdi “Profili kontrol et” düğmesine bas.")
+        notify("Adres yapıştırıldı. Şimdi sunucuları getirin.")
     }
 
     func saveExpiry() {
@@ -1227,24 +1243,25 @@ private struct ContentView: View {
 
     private var vpnPage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Card("Bağlantı", symbol: "checkmark.shield") {
+            Card("Mevcut bağlantı", symbol: "checkmark.shield") {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("VPN çıkış IP'si").font(AppFont.regular(12)).foregroundStyle(.secondary)
-                        Text(model.exitIP ?? "Test edilmedi")
+                        Text(model.exitIP ?? (isDirect ? "Normal internet" : (vpnRunning ? "VPN açık" : "Bağlantı yok")))
                             .font(AppFont.bold(model.exitIP == nil ? 15 : 20))
                             .foregroundStyle(model.exitIP == nil ? .secondary : .primary)
                             .textSelection(.enabled)
                     }
                     Spacer()
                     Button { model.test() } label: {
-                        Label("Kurulu sunucuyu test et", systemImage: "play.fill")
+                        Label(model.exitIP == nil ? "Çıkış IP'sini ölç" : "Çıkış IP'sini yenile",
+                              systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(AppActionButtonStyle(prominent: true))
+                    .buttonStyle(AppActionButtonStyle())
                     .disabled(model.busy || !vpnRunning)
                 }
                 if isDirect || !vpnRunning {
-                    Label(isDirect ? "Normal internet açık; bu düğme kurulu VPN sunucusunu dener."
+                    Label(isDirect ? "Normal internet açık; bu düğme kurulu VPN sunucusunu kontrol eder."
                                    : "VPN servisi çalışmıyor.",
                           systemImage: "info.circle")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
@@ -1261,12 +1278,18 @@ private struct ContentView: View {
         !model.subscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Sunucu seçimi, profil kontrolü başarılı olunca görünür.
+    /// Adımlar, önceki aşama tamamlandıktan sonra sırayla görünür.
     private var serverChangeCard: some View {
-        Card("Sunucuyu değiştir", symbol: "arrow.triangle.2.circlepath") {
+        Card("Yeni sunucu kur", subtitle: "Adresi ekle, bağlantıyı dene, sonra kur.",
+             symbol: "arrow.triangle.2.circlepath",
+             accessory: {
+                 Badge(text: "\(model.candidateExitIP != nil ? 3 : (model.previewNodes.isEmpty ? 1 : 2))/3",
+                       color: Theme.accent)
+             }) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 12) {
-                    StepHeader(number: 1, title: "Profil ekle", done: !model.previewNodes.isEmpty, active: true)
+                    StepHeader(number: 1, title: "Bağlantıyı ekle",
+                               done: !model.previewNodes.isEmpty, active: true)
                     HStack(alignment: .top) {
                         Group {
                             if model.showSubscription {
@@ -1282,6 +1305,7 @@ private struct ContentView: View {
                                     .textFieldStyle(.roundedBorder)
                             }
                         }
+                        .disabled(model.busy)
                         .onChange(of: model.subscription) { _, _ in
                             model.previewNodes = []
                             model.selectedNodeTag = ""
@@ -1291,6 +1315,7 @@ private struct ContentView: View {
                         Button { model.pasteProfile() } label: {
                             Label("Yapıştır", systemImage: "doc.on.clipboard")
                         }
+                        .disabled(model.busy)
                         Button { model.showSubscription.toggle() } label: {
                             Image(systemName: model.showSubscription ? "eye.slash" : "eye")
                         }
@@ -1298,7 +1323,7 @@ private struct ContentView: View {
                     }
                     HStack {
                         Button { model.preview() } label: {
-                            Label("Profili kontrol et", systemImage: "magnifyingglass")
+                            Label("Sunucuları getir", systemImage: "arrow.down.to.line")
                         }
                         .disabled(model.busy || !hasProfile)
                         Spacer()
@@ -1321,7 +1346,8 @@ private struct ContentView: View {
                     Divider()
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            StepHeader(number: 2, title: "Sunucu seç", done: false, active: true)
+                            StepHeader(number: 2, title: "Bağlantıyı test et",
+                                       done: model.candidateExitIP != nil, active: true)
                             Spacer()
                             Badge(text: "\(model.previewNodes.count) sunucu", color: Theme.accent)
                         }
@@ -1343,6 +1369,7 @@ private struct ContentView: View {
                                         .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
+                                    .disabled(model.busy)
                                     if node.id != model.previewNodes.last?.id { Divider() }
                                 }
                             }
@@ -1350,27 +1377,36 @@ private struct ContentView: View {
                         } else if let only = model.previewNodes.first {
                             Label(only.name, systemImage: "server.rack").font(AppFont.medium(13))
                         }
-                        Button { model.probeProfile() } label: {
-                            Label("Yeni sunucuyu test et", systemImage: "play.fill")
-                        }
-                        .buttonStyle(AppActionButtonStyle(prominent: false))
-                        .disabled(model.busy)
                         if let ip = model.candidateExitIP {
-                            Label("Çalışıyor · VPN çıkış IP: \(ip)", systemImage: "checkmark.circle.fill")
-                                .font(AppFont.medium(12)).foregroundStyle(.green)
+                            Label("Bağlantı başarılı · Çıkış IP: \(ip)", systemImage: "checkmark.circle.fill")
+                                .font(AppFont.medium(12)).foregroundStyle(Theme.accent)
                         } else if let error = model.candidateError {
                             Label(error, systemImage: "xmark.circle.fill")
                                 .font(AppFont.regular(12)).foregroundStyle(.red)
                         } else {
-                            Text("Profil okundu; bağlantı henüz test edilmedi.")
+                            Text("Test, kurulu VPN bağlantısını değiştirmez.")
                                 .font(AppFont.regular(12)).foregroundStyle(.secondary)
                         }
+                        Button { model.probeProfile() } label: {
+                            Label(model.candidateExitIP == nil ? "Bağlantıyı test et" : "Tekrar test et",
+                                  systemImage: "play.fill")
+                        }
+                        .buttonStyle(AppActionButtonStyle(prominent: model.candidateExitIP == nil))
+                        .disabled(model.busy)
+                    }
+                }
+                if model.candidateExitIP != nil {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        StepHeader(number: 3, title: "Router'a kur", done: false, active: true)
+                        Text("Bağlantı doğrulandı. Kurulumdan sonra Wi-Fi bu sunucuyu kullanır.")
+                            .font(AppFont.regular(12)).foregroundStyle(.secondary)
                         Button { model.apply() } label: {
-                            Label("Test et ve kur", systemImage: "arrow.down.to.line")
+                            Label("Sunucuyu kur", systemImage: "arrow.down.to.line")
                         }
                         .buttonStyle(AppActionButtonStyle(prominent: true))
                         .disabled(model.busy)
-                        .help("Yeni sunucu önce test edilir; başarısızsa mevcut bağlantı korunur.")
+                        .help("Kurulum sırasında sunucu yeniden doğrulanır; başarısızsa mevcut bağlantı korunur.")
                     }
                 }
             }
