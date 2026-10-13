@@ -859,7 +859,7 @@ private struct ContentView: View {
             .padding(.horizontal, 10)
             .frame(height: 44)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? Theme.accent.opacity(0.11) : Color.clear,
+            .background(selected ? Color.white : Color.clear,
                         in: RoundedRectangle(cornerRadius: 10))
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
