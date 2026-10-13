@@ -16,7 +16,11 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt ve Xray için macOS kontrol paneli.
 **Kurulum düğmesinin kapsamı:** Mac ile LAN üzerinden erişilen, SSH anahtarı tanıtılmış Xiaomi 4C üzerinde mevcut OpenWrt/Xray temelini denetler; yardımcı betikleri ve cron görevlerini yeniden yükler. İlk firmware kurulumu, SSH anahtarı tanıtma ve Xray çekirdeğini flash belleğe yerleştirme bu düğmenin kapsamı dışındadır. Eksik ön koşullar uygulamada açık hata olarak gösterilir. Kurulum sırasında mevcut abonelik, Xray yapılandırması ve internet modu korunur.
 - Cihazlar sayfasında Wi-Fi cihazı başına indirme hızı ve bugün indirilen veri
 
-**9 Ekim 2026 canlı durum:** Router normal internet modunda. Mevcut aboneliğin VLESS profili Mac'te, router'ın WAN bağlantısı üzerinden doğrulandı; router'ın kendi Xray işleminde gerçek web isteği zaman aşımına uğruyor. Uygulama VPN çıkışını test etmeden VPN moduna geçmez. Telefonda VPN henüz çalışıyor olarak doğrulanmadı.
+**13 Ekim 2026 çalışan router sürümü:** Happ uygulamasından alınan Shadowsocks sunucu profili, Xiaomi Mi Router 4C üzerinde `ss-local` ve `ss-redir` ile çalışıyor. Router yeniden başlatıldıktan sonra servis otomatik açıldı. Android telefon `HappVPN` Wi-Fi ağına bağlandığında çıkış IP'si `78.232.59.122` olarak ve YouTube erişimiyle doğrulandı. DNS istekleri VPN içinden iletiliyor. `Scripts/happ-ss.init`, `Scripts/happ-ss.nft` ve `Scripts/mode.sh` bu çalışan yönlendirme düzeninin kaynak dosyalarıdır.
+
+Sunucu parolası yalnızca router'daki `/etc/happvpn/ss-client.json` dosyasında tutulur; bu depoda bulunmaz. Güvenlik duvarındaki `6c:1f:f7:17:eb:39` MAC adresi kurulum sırasında Mac'in kablolu bağlantısını doğrudan internette tutmak için ayrılmıştır. Başka kurulumda bu adres uyarlanmalıdır. VPN yönlendiricisi durursa Wi-Fi istemcileri doğrudan WAN'a çıkamaz. Abonelik bitişini denetleyen mevcut görev, süre dolduğunda doğrudan moda geçer.
+
+macOS uygulamasının abonelik kurma ekranı hâlâ Xray/VLESS yolunu kullanıyor; çalışan Shadowsocks sunucusunu değiştirme işlevi için uyarlanması gerekiyor.
 
 VLESS WebSocket/TLS adayları için hafif TCP erişim testi 30 dakikada bir çalışır. Bu ölçüm VPN kimlik doğrulamasını veya gerçek çıkış hızını kanıtlamaz. Otomatik sunucu seçimi üzerinde çalışılıyor. Router'ın 64 MB belleğine sığması için aynı anda yalnızca bir VLESS sunucusu Xray'e yüklenir; listedeki diğer sunucuların TCP gecikmesi görünür, fakat trafik onlara otomatik geçmez. `n/a`, TCP bağlantısının kurulamadığını veya ölçümün bulunmadığını gösterir. Ülke bayrakları sağlayıcının etiketidir, fiziksel konum kanıtı değildir.
 
@@ -40,7 +44,7 @@ Abonelik URL'si uygulamada Keychain'de, router'da root erişimli dosyada saklan�
 
 ## Sınırlar
 
-Router 64 MB RAM ve tek çekirdekli. İlk router ölçüm ve otomatik geçiş denemesi, sağlayıcı bağlantıları router WAN'ından zaman aşımına uğradığı için canlı trafiğe alınmadı. Süre dolumu sonrası doğrudan internet geçişi kuruldu, ancak uçtan uca test edilmedi.
+Router 64 MB RAM ve tek çekirdekli. Xray/VLESS yolu bu cihazda açılışta takıldığı için çalışan bağlantıda Shadowsocks-libev kullanılır. `ss-local`, `ss-redir` ve DNS relay servisi açılışta procd tarafından başlatılır. Süre dolumu sonrası doğrudan internet geçişi kuruldu, ancak uçtan uca test edilmedi.
 
 Elle doğrudan internet ve VPN moduna geçiş router'da doğrulandı; geçişten sonra VPN çıkış IP'si tekrar başarıyla ölçüldü. Telefonla doğrudan mod trafik testi ayrıca yapılmalıdır.
 

@@ -3,14 +3,13 @@
 set -eu
 MODE_FILE=/etc/happvpn/mode
 NFT_FILE=/etc/nftables.d/happvpn.nft
-NFT_BACKUP=/etc/happvpn/happvpn.nft.vpn
+NFT_BACKUP=/etc/happvpn/happvpn.nft.vpn.ss
 FORWARDING=firewall.@forwarding[0].enabled
 DNSMASQ=dhcp.@dnsmasq[0]
 
 case "${1:-}" in
   direct)
     [ "$(cat "$MODE_FILE" 2>/dev/null || true)" = direct ] && exit 0
-    [ -s "$NFT_BACKUP" ] || cp "$NFT_FILE" "$NFT_BACKUP"
     printf '%s\n' 'chain happvpn_prerouting { type filter hook prerouting priority mangle; policy accept; }' > "$NFT_FILE"
     uci set "$FORWARDING=1"
     uci commit firewall
@@ -25,11 +24,15 @@ case "${1:-}" in
   vpn)
     [ "$(cat "$MODE_FILE" 2>/dev/null || true)" = vpn ] && exit 0
     [ -s "$NFT_BACKUP" ] || { echo 'VPN firewall backup missing' >&2; exit 1; }
-    uci set "$FORWARDING=0"
+    netstat -lnt | grep -q ':12345 ' || { echo 'Shadowsocks redirector is not running' >&2; exit 1; }
+    # The nftables guard blocks direct forwarding for Wi-Fi clients. Keep
+    # forwarding enabled so the Mac's wired connection can stay online.
+    uci set "$FORWARDING=1"
     uci commit firewall
     cp "$NFT_BACKUP" "$NFT_FILE"
     uci set "$DNSMASQ.noresolv=1"
-    uci set "$DNSMASQ.server=127.0.0.1#5354"
+    uci -q delete "$DNSMASQ.server" || true
+    uci add_list "$DNSMASQ.server=127.0.0.1#5354"
     uci commit dhcp
     /etc/init.d/firewall reload
     /etc/init.d/dnsmasq restart

@@ -1,0 +1,16 @@
+chain happvpn_tcp {
+    type nat hook prerouting priority dstnat; policy accept;
+    iifname != "br-lan" return
+    ether saddr 6c:1f:f7:17:eb:39 return
+    meta nfproto ipv4 ip daddr {
+        0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8,
+        169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16,
+        224.0.0.0/4, 240.0.0.0/4
+    } return
+    meta nfproto ipv4 meta l4proto tcp redirect to :12345
+}
+
+chain happvpn_guard {
+    type filter hook forward priority filter - 1; policy accept;
+    iifname "br-lan" ether saddr != 6c:1f:f7:17:eb:39 drop
+}
