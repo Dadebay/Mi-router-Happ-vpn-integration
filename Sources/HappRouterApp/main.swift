@@ -1024,25 +1024,25 @@ private struct ContentView: View {
 
     private var vpnPage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Card("Bağlantı testi", symbol: "checkmark.shield") {
+            Card("Bağlantı", symbol: "checkmark.shield") {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Çıkış IP adresi").font(AppFont.regular(12)).foregroundStyle(.secondary)
-                        Text(model.exitIP ?? "Henüz test edilmedi")
+                        Text("VPN çıkış IP'si").font(AppFont.regular(12)).foregroundStyle(.secondary)
+                        Text(model.exitIP ?? "Test edilmedi")
                             .font(AppFont.bold(model.exitIP == nil ? 15 : 20))
                             .foregroundStyle(model.exitIP == nil ? .secondary : .primary)
                             .textSelection(.enabled)
                     }
                     Spacer()
                     Button { model.test() } label: {
-                        Label("VPN bağlantısını test et", systemImage: "play.fill")
+                        Label("Test et", systemImage: "play.fill")
                     }
                     .buttonStyle(AppActionButtonStyle(prominent: true))
                     .disabled(model.busy || !vpnRunning)
                 }
                 if !vpnRunning {
-                    Label(isDirect ? "Test için Router sayfasından VPN modunu aç."
-                                   : "VPN servisi çalışmıyor; test şu an yapılamaz.",
+                    Label(isDirect ? "Önce Router sayfasından VPN modunu aç."
+                                   : "VPN servisi çalışmıyor.",
                           systemImage: "info.circle")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
                 }
@@ -1058,15 +1058,12 @@ private struct ContentView: View {
         !model.subscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Üç adımlı sunucu değiştirme akışı: yapıştır → kontrol et → seç ve kur.
+    /// Sunucu seçimi, profil kontrolü başarılı olunca görünür.
     private var serverChangeCard: some View {
-        Card("Sunucuyu değiştir",
-             subtitle: "Yeni sunucu önce test edilir; başarısızsa mevcut bağlantı korunur.",
-             symbol: "arrow.triangle.2.circlepath") {
-            VStack(alignment: .leading, spacing: 18) {
-                // 1. adım
-                VStack(alignment: .leading, spacing: 10) {
-                    StepHeader(number: 1, title: "Sunucu profilini yapıştır", done: hasProfile, active: true)
+        Card("Sunucuyu değiştir", symbol: "arrow.triangle.2.circlepath") {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
+                    StepHeader(number: 1, title: "Profil ekle", done: !model.previewNodes.isEmpty, active: true)
                     HStack(alignment: .top) {
                         Group {
                             if model.showSubscription {
@@ -1078,7 +1075,7 @@ private struct ContentView: View {
                                     .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
                             } else {
-                                SecureField("Sunucu JSON, ss:// veya HTTPS bağlantısı", text: $model.subscription)
+                                SecureField("JSON, ss:// veya HTTPS bağlantısı", text: $model.subscription)
                                     .textFieldStyle(.roundedBorder)
                             }
                         }
@@ -1087,75 +1084,67 @@ private struct ContentView: View {
                             model.selectedNodeTag = ""
                         }
                         Button { model.pasteProfile() } label: {
-                            Label("Panodan al", systemImage: "doc.on.clipboard")
+                            Label("Yapıştır", systemImage: "doc.on.clipboard")
                         }
                         Button { model.showSubscription.toggle() } label: {
                             Image(systemName: model.showSubscription ? "eye.slash" : "eye")
                         }
                         .help(model.showSubscription ? "Profili gizle" : "Profili göster")
                     }
-                    DisclosureGroup(isExpanded: $showServerHelp) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("1. Happ macOS uygulamasında çalışan sunucuyu seç.")
-                            Text("2. “Copy Server JSON” komutunu kullan.")
-                            Text("3. Buraya dön ve “Panodan al” düğmesine bas.")
-                            Text("ss:// bağlantısı veya Shadowsocks içeren HTTPS aboneliği de kullanılabilir. Şifreli happ:// bağlantıları doğrudan çözülemez; önce Happ içinde açılmalıdır. Yalnızca VLESS içeren abonelikler bu router'da desteklenmez.")
-                                .foregroundStyle(.secondary)
-                        }
-                        .font(AppFont.regular(12))
-                        .padding(.top, 6)
-                    } label: {
-                        Text("Profili nereden bulurum?").font(AppFont.medium(12)).foregroundStyle(Theme.accent)
-                    }
-                }
-                Divider()
-                // 2. adım
-                VStack(alignment: .leading, spacing: 10) {
-                    StepHeader(number: 2, title: "Profili kontrol et", done: !model.previewNodes.isEmpty, active: hasProfile)
                     HStack {
                         Button { model.preview() } label: {
                             Label("Profili kontrol et", systemImage: "magnifyingglass")
                         }
                         .disabled(model.busy || !hasProfile)
-                        Text(model.previewNodes.isEmpty ? "Profildeki sunucular okunur; router'a henüz bir şey yazılmaz."
-                                                       : "\(model.previewNodes.count) sunucu bulundu.")
-                            .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    DisclosureGroup(isExpanded: $showServerHelp) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Happ'te çalışan sunucuyu seçip “Copy Server JSON” ile kopyala.")
+                            Text("ss:// ve Shadowsocks içeren HTTPS bağlantıları da desteklenir. happ:// bağlantısını önce Happ'te aç. Yalnızca VLESS içeren profiller desteklenmez.")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(AppFont.regular(12))
+                        .padding(.top, 6)
+                    } label: {
+                        Text("Profil nasıl alınır?").font(AppFont.medium(12)).foregroundStyle(Theme.accent)
                     }
                 }
-                Divider()
-                // 3. adım
-                VStack(alignment: .leading, spacing: 10) {
-                    StepHeader(number: 3, title: "Sunucuyu seç ve kur", done: false, active: !model.previewNodes.isEmpty)
-                    if model.previewNodes.count > 1 {
-                        VStack(spacing: 0) {
-                            ForEach(model.previewNodes) { node in
-                                Button { model.selectedNodeTag = node.tag } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: model.selectedNodeTag == node.tag ? "largecircle.fill.circle" : "circle")
-                                            .foregroundStyle(model.selectedNodeTag == node.tag ? Theme.accent : .secondary)
-                                        Text(node.name).lineLimit(1)
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 7).padding(.horizontal, 10)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                if node.id != model.previewNodes.last?.id { Divider() }
-                            }
+                if !model.previewNodes.isEmpty {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            StepHeader(number: 2, title: "Sunucu seç", done: false, active: true)
+                            Spacer()
+                            Badge(text: "\(model.previewNodes.count) sunucu", color: Theme.accent)
                         }
-                        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-                    } else if let only = model.previewNodes.first {
-                        Label(only.name, systemImage: "server.rack").font(AppFont.medium(13))
-                    }
-                    HStack {
+                        if model.previewNodes.count > 1 {
+                            VStack(spacing: 0) {
+                                ForEach(model.previewNodes) { node in
+                                    Button { model.selectedNodeTag = node.tag } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: model.selectedNodeTag == node.tag ? "largecircle.fill.circle" : "circle")
+                                                .foregroundStyle(model.selectedNodeTag == node.tag ? Theme.accent : .secondary)
+                                            Text(node.name).lineLimit(1)
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 7).padding(.horizontal, 10)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    if node.id != model.previewNodes.last?.id { Divider() }
+                                }
+                            }
+                            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                        } else if let only = model.previewNodes.first {
+                            Label(only.name, systemImage: "server.rack").font(AppFont.medium(13))
+                        }
                         Button { model.apply() } label: {
                             Label("Sunucuyu değiştir", systemImage: "arrow.down.to.line")
                         }
                         .buttonStyle(AppActionButtonStyle(prominent: true))
-                        .disabled(model.busy || model.previewNodes.isEmpty)
-                        if model.previewNodes.isEmpty {
-                            Text("Önce 2. adımı tamamla.").font(AppFont.regular(12)).foregroundStyle(.secondary)
-                        }
+                        .disabled(model.busy)
+                        .help("Yeni sunucu önce test edilir; başarısızsa mevcut bağlantı korunur.")
                     }
                 }
             }
@@ -1164,15 +1153,15 @@ private struct ContentView: View {
 
     private var serversCard: some View {
         let nodes = model.status?.nodes ?? []
-        return Card("Router'daki sunucular",
-                    subtitle: activeRouteLabel,
+        return Card("Sunucular",
+                    subtitle: isDirect ? "Normal internet etkin" : nil,
                     symbol: "server.rack",
-                    accessory: { Badge(text: "30 dk'da bir ölçülür", color: .secondary) }) {
+                    accessory: { Badge(text: "30 dk'da ölçüm", color: .secondary) }) {
             if nodes.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "tray").font(.title2).foregroundStyle(.secondary)
                     Text("Henüz sunucu listesi yok").font(AppFont.semiBold(13))
-                    Text("Yukarıdaki adımlarla bir sunucu kurduğunda burada görünür.")
+                    Text("Profil ekleyip sunucu kur.")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
@@ -1185,12 +1174,12 @@ private struct ContentView: View {
                 }
             }
             DisclosureGroup {
-                Text("Gösterilen süre (ms), router'ın sunucuya TCP bağlantısı kurma süresidir. VPN şifresini veya gerçek hızı kanıtlamaz; bağlantının çalıştığını “Bağlantı testi” ile doğrula. Otomatik sunucu değişimi şu anda etkin değil. “Ulaşılamıyor”, TCP bağlantısının kurulamadığı veya ölçümün bulunmadığı anlamına gelir.")
+                Text("ms, sunucuya bağlantı süresidir; VPN hızını göstermez. VPN'i yukarıdaki testle doğrula. Otomatik sunucu değişimi henüz etkin değil. “Ulaşılamıyor”, bağlantı kurulamadığı veya ölçüm olmadığı anlamına gelir.")
                     .font(AppFont.regular(12)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
             } label: {
-                Text("Bu değerler ne anlama geliyor?").font(AppFont.medium(12)).foregroundStyle(Theme.accent)
+                Text("Ölçüm bilgisi").font(AppFont.medium(12)).foregroundStyle(Theme.accent)
             }
         }
     }
@@ -1205,7 +1194,7 @@ private struct ContentView: View {
                 .frame(width: 9, height: 9)
             Text(node.name).font(AppFont.medium(13)).lineLimit(1)
             if isActive { Badge(text: "Aktif", color: Theme.accent) }
-            if isBest { Badge(text: "En düşük", color: Theme.accent) }
+            if isBest { Badge(text: "En düşük ms", color: Theme.accent) }
             Spacer()
             if alive {
                 GeometryReader { proxy in
@@ -1227,8 +1216,8 @@ private struct ContentView: View {
     }
 
     private var subscriptionCard: some View {
-        Card("Abonelik süresi",
-             subtitle: "Süre dolduğunda router otomatik olarak normal internete geçer.",
+        Card("Abonelik",
+             subtitle: "Süre dolunca normal internete geçer.",
              symbol: "calendar",
              accessory: {
                  if let days = daysRemaining {
@@ -1245,7 +1234,7 @@ private struct ContentView: View {
                 Spacer()
             }
             if let days = daysRemaining, days <= 3 {
-                Label("Süre dolmak üzere. Yeni abonelik aldıysan sunucuyu yenile ve tarihi güncelle.",
+                Label("Yeni profil yükleyip bitiş tarihini güncelle.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(AppFont.medium(12)).foregroundStyle(.orange)
             }
@@ -1256,8 +1245,6 @@ private struct ContentView: View {
         Card {
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Test başarısız olduğunda router'ın son VPN olayları burada görünür.")
-                        .font(AppFont.regular(12)).foregroundStyle(.secondary)
                     HStack {
                         Button { model.loadLogs() } label: {
                             Label("Günlükleri yenile", systemImage: "arrow.clockwise")
@@ -1281,7 +1268,7 @@ private struct ContentView: View {
                 }
                 .padding(.top, 10)
             } label: {
-                Label("Sorun giderme günlükleri", systemImage: "doc.text.magnifyingglass")
+                Label("Günlükler", systemImage: "doc.text.magnifyingglass")
                     .font(AppFont.semiBold(14))
             }
         }
@@ -1525,14 +1512,6 @@ private struct ContentView: View {
         return "\(used / 1_048_576) / \(total / 1_048_576) MB"
     }
 
-    private var activeRouteLabel: String {
-        guard model.status?.mode != "direct" else { return "Normal internet modu açık; VPN sunucusu kullanılmıyor." }
-        guard let active = model.status?.activeOutbound, active != "happ-vpn" else {
-            return "Trafik Happ profili üzerinden yönleniyor."
-        }
-        let name = model.status?.nodes.first(where: { $0.tag == active })?.name ?? active
-        return "Aktif VPN sunucusu: \(name)"
-    }
 }
 
 @main
