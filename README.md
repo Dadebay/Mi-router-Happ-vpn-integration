@@ -13,12 +13,15 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt/Shadowsocks VPN için macOS kontrol pane
 - Router sayfasından VPN/doğrudan internet modu arasında elle geçiş
 - Router sayfasında canlı CPU ve RAM kullanımı
 - Router sayfasında mevcut OpenWrt/Shadowsocks kurulumunun yardımcı dosyalarını ve zamanlayıcılarını tek düğmeyle yükleme; VPN sayfasında test hatası ve servis günlüklerini görüntüleme
+- Router üzerinde her gün yapılandırma ve tanı yedeği alma; son 30 günün günlüklerini uygulamada okuma ve dışa aktarma
 
 **Kurulum düğmesinin kapsamı:** Mac ile LAN üzerinden erişilen, SSH anahtarı tanıtılmış Xiaomi 4C üzerinde mevcut OpenWrt/Shadowsocks temelini denetler; yardımcı betikleri, servis dosyasını ve cron görevlerini yeniden yükler. İlk firmware kurulumu, SSH anahtarı tanıtma ve Shadowsocks paketlerinin yüklenmesi bu düğmenin kapsamı dışındadır. Eksik ön koşullar uygulamada açık hata olarak gösterilir. Kurulum sırasında mevcut sunucu profili ve internet modu korunur.
 - Cihazlar sayfasında bağlı Wi-Fi cihazlarının bugünkü toplam indirmesi, cihaz başına indirme hızı ve internet engeli
 - Kaydedilen Sistem / Açık / Koyu görünüm seçimi ve mavi ana renk
 
 **13 Ekim 2026 çalışan router sürümü:** Happ uygulamasından alınan Shadowsocks sunucu profili, Xiaomi Mi Router 4C üzerinde `ss-local` ve `ss-redir` ile çalışıyor. Router yeniden başlatıldıktan sonra servis otomatik açıldı. Android telefon `HappVPN` Wi-Fi ağına bağlandığında çıkış IP'si `78.232.59.122` olarak ve YouTube erişimiyle doğrulandı. DNS istekleri VPN içinden iletiliyor. `Scripts/happ-ss.init`, `Scripts/happ-ss.nft` ve `Scripts/mode.sh` bu çalışan yönlendirme düzeninin kaynak dosyalarıdır.
+
+**Güncel sunucu durumu:** Önceki Paris profili artık gerçek HTTPS çıkış testinde bağlantıyı kapatıyor. Router doğrudan internet modunda kalır; doğrulanmamış profille VPN moduna geçmez. FlyFrog'un şifreli `happ://crypt5` aboneliği Happ içinde sunucu ayarlarını gizliyor. FlyFrog'dan router uyumlu Shadowsocks bağlantısı veya sunucu JSON'u alınmadan bu abonelik router'a yüklenemez.
 
 Sunucu parolası yalnızca router'daki `/etc/happvpn/ss-client.json` dosyasında tutulur; bu depoda bulunmaz. Güvenlik duvarındaki `6c:1f:f7:17:eb:39` MAC adresi kurulum sırasında Mac'in kablolu bağlantısını doğrudan internette tutmak için ayrılmıştır. Başka kurulumda bu adres uyarlanmalıdır. VPN yönlendiricisi durursa Wi-Fi istemcileri doğrudan WAN'a çıkamaz. Abonelik bitişini denetleyen mevcut görev, süre dolduğunda doğrudan moda geçer.
 
@@ -43,6 +46,8 @@ python3 -m py_compile Scripts/routerctl.py
 Uygulamayı paketlerken `Scripts/routerctl.py` ve `Scripts/RouterScripts` kaynaklarını ekleyin. `Scripts/build-app.sh` bunu yapar. Gilroy fontlarını kullanıcıya ait yerel font klasöründen paketleyin; lisanslı font dosyaları depoda bulunmaz.
 
 Girilen profil uygulamada Keychain'de, aktif sunucu parolası router'da yalnızca root erişimli dosyada saklanır. VPN kimlik bilgileri ve özel SSH anahtarı bu depoya eklenmez. Veri sayaçları aylık fatura miktarı değildir; router yeniden başladığında sıfırlanır.
+
+Tanı yedeği router'da `/etc/happvpn/backups/YYYY-MM-DD.tar.gz` olarak root erişimiyle saklanır. Ağ ve VPN yapılandırmaları da arşivde bulunduğundan arşivler gizli tutulmalıdır. Uygulama yalnızca tanı metnini gösterir veya dışa aktarır; VPN parolasını dışa aktarmaz. Görev her gün router UTC saatiyle 00:05'te çalışır, eski arşivleri 30 gün sonunda kaldırır, en fazla 30 arşiv ve toplam 384 KB tutar; overlay boş alanı 512 KB altına düşecekse en eskileri siler veya yeni yedeği atlar.
 
 ## Sınırlar
 

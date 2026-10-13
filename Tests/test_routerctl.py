@@ -76,5 +76,21 @@ class ServerSelectionTests(unittest.TestCase):
         ssh.assert_not_called()
 
 
+class DiagnosticBackupTests(unittest.TestCase):
+    def test_archive_date_is_validated_before_ssh(self):
+        with patch.object(routerctl, 'ssh') as ssh:
+            with self.assertRaises(ValueError):
+                routerctl.backup_read('2026-10-13;reboot')
+        ssh.assert_not_called()
+
+    def test_archive_listing_keeps_only_dated_files(self):
+        listing = b'2026-10-13 2048\ninvalid 100\n2026-10-12 1024\n'
+        with patch.object(routerctl, 'ssh', return_value=listing):
+            self.assertEqual(routerctl.list_backups(), [
+                {'date': '2026-10-13', 'size': 2048},
+                {'date': '2026-10-12', 'size': 1024},
+            ])
+
+
 if __name__ == '__main__':
     unittest.main()

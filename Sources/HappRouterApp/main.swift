@@ -41,6 +41,12 @@ private struct Node: Decodable, Identifiable {
     var id: String { tag }
 }
 
+private struct BackupInfo: Decodable, Identifiable {
+    let date: String
+    let size: Int
+    var id: String { date }
+}
+
 private struct RouterStatus: Decodable {
     let ok: Bool
     let vpnRunning: Bool
@@ -73,11 +79,12 @@ private struct BackendResult: Decodable {
     let nodes: [Node]?
     let note: String?
     let logs: String?
+    let backups: [BackupInfo]?
 }
 
 private enum Backend {
     static func run(_ command: String, input: String? = nil, expires: Int? = nil,
-                    tag: String? = nil, mac: String? = nil) throws -> Data {
+                    tag: String? = nil, mac: String? = nil, date: String? = nil) throws -> Data {
         let script: URL
         if let resource = Bundle.main.resourceURL?.appendingPathComponent("routerctl.py"),
            FileManager.default.fileExists(atPath: resource.path) {
@@ -96,6 +103,7 @@ private enum Backend {
         if let expires { arguments += ["--expires", String(expires)] }
         if let tag { arguments += ["--tag", tag] }
         if let mac { arguments += ["--mac", mac] }
+        if let date { arguments += ["--date", date] }
         process.arguments = arguments
         let output = Pipe()
         let error = Pipe()
@@ -187,6 +195,11 @@ private final class DashboardModel: ObservableObject {
     @Published var lastRefresh: Date?
     @Published var exitIP: String?
     @Published var logs = ""
+    @Published var backups: [BackupInfo] = []
+    @Published var selectedBackupDate = ""
+    @Published var backupLog = ""
+    @Published var backupLogDate = ""
+    @Published var backupBusy = false
     @Published var serverActionError: String?
     @Published var helperUpdate: HelperUpdateState = .idle
     @Published var deviceRates: [String: Double] = [:]
@@ -329,6 +342,85 @@ private final class DashboardModel: ObservableObject {
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
                 logs = result.logs ?? result.error ?? "Günlük bulunamadı"
             } catch { logs = error.localizedDescription }
+        }
+    }
+
+    private func updateBackups(_ entries: [BackupInfo]) {
+        backups = entries
+        if !entries.contains(where: { $0.date == selectedBackupDate }) {
+            selectedBackupDate = entries.first?.date ?? ""
+        }
+    }
+
+    func loadBackups() {
+        guard !backupBusy else { return }
+        backupBusy = true
+        Task {
+            defer { backupBusy = false }
+            do {
+                let data = try await Task.detached(priority: .utility) {
+                    try Backend.run("backup-list")
+                }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                if result.ok {
+                    updateBackups(result.backups ?? [])
+                } else {
+                    notify(result.error ?? "Yedekler okunamadı", .error)
+                }
+            } catch { notify(error.localizedDescription, .error) }
+        }
+    }
+
+    func createBackup() {
+        guard !backupBusy else { return }
+        backupBusy = true
+        Task {
+            defer { backupBusy = false }
+            do {
+                let data = try await Task.detached(priority: .utility) {
+                    try Backend.run("backup-now")
+                }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                if result.ok {
+                    updateBackups(result.backups ?? [])
+                    notify(result.note ?? "Tanı yedeği oluşturuldu", .success)
+                } else {
+                    notify(result.error ?? "Yedek oluşturulamadı", .error)
+                }
+            } catch { notify(error.localizedDescription, .error) }
+        }
+    }
+
+    func openBackup(export: Bool = false) {
+        let day = selectedBackupDate
+        guard !day.isEmpty, !backupBusy else { return }
+        backupBusy = true
+        Task {
+            defer { backupBusy = false }
+            do {
+                let data = try await Task.detached(priority: .utility) {
+                    try Backend.run("backup-read", date: day)
+                }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                guard result.ok, let text = result.logs else {
+                    notify(result.error ?? "Yedek günlüğü okunamadı", .error)
+                    return
+                }
+                if export {
+                    let panel = NSSavePanel()
+                    panel.nameFieldStringValue = "HappRouter-tani-\(day).txt"
+                    panel.canCreateDirectories = true
+                    if panel.runModal() == .OK, let url = panel.url {
+                        try text.write(to: url, atomically: true, encoding: .utf8)
+                        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                                               ofItemAtPath: url.path)
+                        notify("Tanı günlüğü kaydedildi", .success)
+                    }
+                } else {
+                    backupLog = text
+                    backupLogDate = day
+                }
+            } catch { notify(error.localizedDescription, .error) }
         }
     }
 
@@ -1467,6 +1559,46 @@ private struct ContentView: View {
             .padding(16)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke))
+
+            Card("Tanı yedekleri", subtitle: "Günlük · son 30 gün", symbol: "archivebox") {
+                HStack(spacing: 10) {
+                    Picker("Gün", selection: $model.selectedBackupDate) {
+                        if model.backups.isEmpty {
+                            Text("Yedek yok").tag("")
+                        } else {
+                            ForEach(model.backups) { entry in
+                                Text(entry.date).tag(entry.date)
+                            }
+                        }
+                    }
+                    .frame(width: 190)
+                    .disabled(model.backups.isEmpty || model.backupBusy)
+                    Button("Göster") { model.openBackup() }
+                        .disabled(model.selectedBackupDate.isEmpty || model.backupBusy)
+                    Button("Günlüğü kaydet") { model.openBackup(export: true) }
+                        .disabled(model.selectedBackupDate.isEmpty || model.backupBusy)
+                    Spacer(minLength: 8)
+                    if model.backupBusy { ProgressView().controlSize(.small) }
+                    Button("Şimdi yedekle") { model.createBackup() }
+                        .disabled(model.backupBusy)
+                }
+                if !model.backupLog.isEmpty {
+                    Text(model.backupLogDate)
+                        .font(AppFont.semiBold(12)).foregroundStyle(.secondary)
+                    ScrollView([.horizontal, .vertical]) {
+                        Text(model.backupLog)
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 200)
+                    .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                }
+                Text("Alan azalınca en eski yedekler otomatik silinir.")
+                    .font(AppFont.regular(11)).foregroundStyle(.secondary)
+            }
+            .onAppear { model.loadBackups() }
         }
     }
 

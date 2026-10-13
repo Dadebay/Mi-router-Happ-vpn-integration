@@ -26,7 +26,8 @@ HOST = '192.168.1.1'
 SSH_KEY = HOME / 'router_rsa'
 KNOWN_HOSTS = HOME / 'known_hosts'
 ROUTER_SCRIPTS = ('mode.sh', 'expiry-check.sh', 'probe-nodes.lua', 'usage-sample.lua',
-                  'dns-relay.lua', 'node-helper.lua', 'switch-node.sh')
+                  'dns-relay.lua', 'node-helper.lua', 'switch-node.sh',
+                  'diagnostic-backup.sh')
 SUPPORTED_CIPHERS = frozenset({
     'aes-128-gcm', 'aes-192-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305',
     'xchacha20-ietf-poly1305', 'aes-128-cfb', 'aes-192-cfb', 'aes-256-cfb',
@@ -36,6 +37,7 @@ CRON_ENTRIES = (
     '*/5 * * * * /etc/happvpn/expiry-check.sh',
     '* * * * * /etc/happvpn/usage-sample.lua',
     '*/30 * * * * /etc/happvpn/switch-node.sh auto',
+    '5 0 * * * /etc/happvpn/diagnostic-backup.sh',
 )
 MAC_PATTERN = re.compile(r'[0-9a-f]{2}(?::[0-9a-f]{2}){5}')
 BLOCKED_FILE = '/etc/happvpn/blocked-macs'
@@ -143,6 +145,40 @@ def diagnostics():
     output = ssh(command, timeout=25).decode('utf-8', 'replace')[-12000:]
     output = re.sub(r'https?://[^\s]+', '[adres gizlendi]', output)
     output = re.sub(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}\b', '[kimlik gizlendi]', output)
+    emit({'ok': True, 'logs': output})
+
+
+def list_backups():
+    raw = ssh("for file in /etc/happvpn/backups/????-??-??.tar.gz; do "
+              "[ -f \"$file\" ] || continue; "
+              "name=${file##*/}; printf '%s %s\\n' \"${name%.tar.gz}\" \"$(wc -c < \"$file\")\"; "
+              "done", timeout=20).decode('utf-8', 'replace')
+    backups = []
+    for line in raw.splitlines():
+        match = re.fullmatch(r'(\d{4}-\d{2}-\d{2})\s+(\d+)', line.strip())
+        if match:
+            backups.append({'date': match.group(1), 'size': int(match.group(2))})
+    return sorted(backups, key=lambda entry: entry['date'], reverse=True)
+
+
+def backup_list():
+    emit({'ok': True, 'backups': list_backups()})
+
+
+def backup_now():
+    ssh('/etc/happvpn/diagnostic-backup.sh', timeout=40)
+    emit({'ok': True, 'note': 'Tanı yedeği router üzerinde oluşturuldu.',
+          'backups': list_backups()})
+
+
+def backup_read(day):
+    if not day or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
+        raise ValueError('Geçerli bir yedek günü seçin.')
+    output = ssh(f'tar -xOzf /etc/happvpn/backups/{day}.tar.gz diagnostics.txt',
+                 timeout=25).decode('utf-8', 'replace')[:32000]
+    output = re.sub(r'(?:https?|ss)://[^\s]+', '[adres gizlendi]', output)
+    output = re.sub(r'(?i)(password|passwd|token|secret)\s*[:=]\s*[^\s,;]+',
+                    r'\1=[gizlendi]', output)
     emit({'ok': True, 'logs': output})
 
 
@@ -679,6 +715,9 @@ def active_test(emit_result=True, remote_port=1080):
         return body
     except TimeoutError as exc:
         raise RuntimeError('Router üzerindeki VPN 60 saniyede yanıt vermedi.') from exc
+    except ssl.SSLError as exc:
+        raise RuntimeError('VPN sunucusu güvenli bağlantıyı kapattı. Başka bir çalışan '
+                           'Shadowsocks profili ekleyip çıkışı yeniden test edin.') from exc
     finally:
         proc.terminate()
         try:
@@ -691,12 +730,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['status', 'preview', 'test', 'apply', 'expiry',
                                             'mode-vpn', 'mode-direct', 'install', 'logs',
+                                            'backup-list', 'backup-now', 'backup-read',
                                             'select-node', 'auto-node',
                                             'block-device', 'unblock-device'])
     parser.add_argument('--url')
     parser.add_argument('--expires', type=int)
     parser.add_argument('--tag')
     parser.add_argument('--mac')
+    parser.add_argument('--date')
     args = parser.parse_args()
     try:
         if args.command == 'status':
@@ -705,6 +746,12 @@ def main():
             install_helpers()
         elif args.command == 'logs':
             diagnostics()
+        elif args.command == 'backup-list':
+            backup_list()
+        elif args.command == 'backup-now':
+            backup_now()
+        elif args.command == 'backup-read':
+            backup_read(args.date)
         elif args.command in ('preview', 'apply'):
             url = sys.stdin.read().strip() if args.url == '-' else args.url
             if not url:
