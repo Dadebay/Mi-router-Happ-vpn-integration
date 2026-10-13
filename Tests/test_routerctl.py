@@ -77,10 +77,21 @@ class ServerSelectionTests(unittest.TestCase):
 
 
 class CandidateProbeTests(unittest.TestCase):
+    def test_exit_probe_connects_to_ipv4_destination(self):
+        answer = [(routerctl.socket.AF_INET, routerctl.socket.SOCK_STREAM, 6,
+                   '', ('34.160.111.145', 443))]
+        with patch.object(routerctl.socket, 'getaddrinfo', return_value=answer) as lookup:
+            request = routerctl.socks_ipv4_request('ifconfig.me', 443)
+        lookup.assert_called_once_with('ifconfig.me', 443, routerctl.socket.AF_INET,
+                                       routerctl.socket.SOCK_STREAM)
+        self.assertEqual(request, b'\x05\x01\x00\x01\x22\xa0\x6f\x91\x01\xbb')
+
     def test_exit_ip_accepts_ipv4_and_ipv6_but_rejects_non_ip_response(self):
         self.assertEqual(routerctl.validated_exit_ip('65.109.188.233'), '65.109.188.233')
         self.assertEqual(routerctl.validated_exit_ip('2a01:4f9:c010:2f23::1'),
                          '2a01:4f9:c010:2f23::1')
+        with self.assertRaisesRegex(RuntimeError, 'IP yanıtı geçersiz'):
+            routerctl.validated_exit_ip('2a01:4f9:c010:2f23::1', version=4)
         with self.assertRaisesRegex(RuntimeError, 'IP yanıtı geçersiz'):
             routerctl.validated_exit_ip('<html>error</html>')
 

@@ -196,6 +196,9 @@ private final class DashboardModel: ObservableObject {
     @Published var reachable: Bool?
     @Published var lastRefresh: Date?
     @Published var exitIP: String?
+    @Published var exitError: String?
+    @Published var exitChecking = false
+    @Published var exitTestedAt: Date?
     @Published var logs = ""
     @Published var backups: [BackupInfo] = []
     @Published var selectedBackupDate = ""
@@ -203,6 +206,7 @@ private final class DashboardModel: ObservableObject {
     @Published var backupLogDate = ""
     @Published var backupBusy = false
     @Published var serverActionError: String?
+    private var exitProbeKey: String?
     @Published var helperUpdate: HelperUpdateState = .idle
     @Published var deviceRates: [String: Double] = [:]
     @Published var expiration = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 6)) ?? Date()
@@ -244,6 +248,12 @@ private final class DashboardModel: ObservableObject {
                     }
                     previousDevices[device.mac] = (received, now)
                 }
+                if status?.activeOutbound != newStatus.activeOutbound || status?.mode != newStatus.mode {
+                    exitIP = nil
+                    exitError = nil
+                    exitTestedAt = nil
+                    exitProbeKey = nil
+                }
                 status = newStatus
                 reachable = true
                 lastRefresh = now
@@ -265,25 +275,43 @@ private final class DashboardModel: ObservableObject {
         }
     }
 
-    func test() {
-        busy = true
+    func measureExitIfNeeded() {
+        guard let status, status.mode == "vpn", status.vpnRunning else { return }
+        let key = status.activeOutbound
+        guard exitProbeKey != key, !exitChecking else { return }
+        test(automatic: true)
+    }
+
+    func test(automatic: Bool = false) {
+        guard !exitChecking, let status, status.vpnRunning else { return }
+        exitProbeKey = status.activeOutbound
+        exitChecking = true
         exitIP = nil
-        notify("VPN çıkış adresi test ediliyor…")
+        exitError = nil
+        exitTestedAt = nil
+        if !automatic { notify("VPN çıkış IPv4 adresi ölçülüyor…") }
         Task {
-            defer { busy = false }
+            defer { exitChecking = false }
             do {
                 let data = try await Task.detached(priority: .utility) { try Backend.run("test") }.value
                 let result = try JSONDecoder().decode(BackendResult.self, from: data)
                 if result.ok {
                     exitIP = result.exitIP
-                    notify("VPN bağlantısı başarılı", .success)
+                    exitTestedAt = Date()
+                    if !automatic { notify("VPN çıkış IPv4 adresi doğrulandı", .success) }
                 } else {
-                    notify(result.error ?? "Test başarısız", .error)
-                    loadLogs()
+                    exitError = result.error ?? "VPN çıkışı doğrulanamadı."
+                    if !automatic {
+                        notify(exitError!, .error)
+                        loadLogs()
+                    }
                 }
             } catch {
-                notify(error.localizedDescription, .error)
-                loadLogs()
+                exitError = error.localizedDescription
+                if !automatic {
+                    notify(error.localizedDescription, .error)
+                    loadLogs()
+                }
             }
         }
     }
@@ -509,6 +537,9 @@ private final class DashboardModel: ObservableObject {
                 if result.ok {
                     SecretStore.write(profile)
                     exitIP = result.exitIP
+                    exitError = nil
+                    exitTestedAt = Date()
+                    exitProbeKey = tag
                     notify("Yeni sunucu çalışıyor. VPN çıkış IP: \(result.exitIP ?? "doğrulandı")", .success)
                     previewNodes = []
                     selectedNodeTag = ""
@@ -892,6 +923,20 @@ private struct ContentView: View {
     private var page: AppPage { selectedPage ?? .overview }
     private var isDirect: Bool { model.status?.mode == "direct" }
     private var vpnRunning: Bool { model.status?.vpnRunning == true }
+    private var vpnExitText: String {
+        if isDirect { return "Normal internet" }
+        if let ip = model.exitIP { return ip }
+        if model.exitChecking { return "Ölçülüyor…" }
+        if model.exitError != nil { return "Doğrulanamadı" }
+        return vpnRunning ? "Henüz ölçülmedi" : "VPN kapalı"
+    }
+    private var vpnExitDetail: String {
+        if isDirect { return "VPN çıkışı kullanılmıyor." }
+        if let date = model.exitTestedAt {
+            return "Son ölçüm: \(date.formatted(date: .omitted, time: .shortened))"
+        }
+        return model.exitError ?? "Router üzerinden IPv4 çıkışı ölçülür."
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -924,6 +969,7 @@ private struct ContentView: View {
         .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
         .onAppear { model.refresh() }
         .onReceive(timer) { _ in model.refresh() }
+        .onChange(of: model.status?.updatedAt) { _, _ in model.measureExitIfNeeded() }
         .confirmationDialog("Normal internete geçilsin mi?", isPresented: $confirmDirect, titleVisibility: .visible) {
             Button("Normal interneti aç", role: .destructive) { model.changeMode("direct") }
             Button("Vazgeç", role: .cancel) {}
@@ -1073,6 +1119,7 @@ private struct ContentView: View {
         if model.reachable == false { return .red }
         if model.status == nil { return .orange }
         if isDirect { return .blue }
+        if model.exitError != nil { return .orange }
         return vpnRunning ? Theme.accent : .orange
     }
 
@@ -1087,7 +1134,8 @@ private struct ContentView: View {
         if model.reachable == false { return "Router'a ulaşılamıyor" }
         if model.status == nil { return "Kontrol ediliyor…" }
         if isDirect { return "Normal internet açık" }
-        return vpnRunning ? "VPN koruması açık" : "VPN başlatılıyor"
+        if model.exitError != nil { return "VPN çıkışı doğrulanamadı" }
+        return vpnRunning ? "VPN servisi açık" : "VPN başlatılıyor"
     }
 
     private var heroDetail: String {
@@ -1096,8 +1144,9 @@ private struct ContentView: View {
         }
         if model.status == nil { return "Router'dan durum bilgisi bekleniyor." }
         if isDirect { return "HappVPN ağındaki cihazlar VPN kullanmadan, gerçek IP adresiyle internete çıkıyor." }
+        if model.exitError != nil { return "Router VPN servisi açık, fakat internet çıkışı son testte doğrulanamadı." }
         return vpnRunning
-            ? "HappVPN Wi-Fi ağına bağlanan tüm cihazlar VPN üzerinden internete çıkıyor."
+            ? "HappVPN cihazlarının internette görünen IPv4 adresi aşağıda ölçülür."
             : "VPN servisi hazır olunca durum otomatik güncellenir."
     }
 
@@ -1117,16 +1166,16 @@ private struct ContentView: View {
             Spacer(minLength: 16)
             if !isDirect && model.reachable != false {
                 VStack(alignment: .trailing, spacing: 8) {
-                    Text("VPN çıkış IP").font(AppFont.medium(11)).foregroundStyle(.secondary)
-                    Text(model.exitIP ?? "Henüz test edilmedi")
+                    Text("VPN çıkış IPv4").font(AppFont.medium(11)).foregroundStyle(.secondary)
+                    Text(vpnExitText)
                         .font(AppFont.bold(model.exitIP == nil ? 13 : 18))
                         .foregroundStyle(model.exitIP == nil ? .secondary : .primary)
                         .textSelection(.enabled)
                     Button { model.test() } label: {
-                        Label("Çıkışı test et", systemImage: "checkmark.shield")
+                        Label("IP'yi yeniden ölç", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(AppActionButtonStyle(prominent: true))
-                    .disabled(model.busy || !vpnRunning)
+                    .disabled(model.exitChecking || !vpnRunning)
                 }
             }
         }
@@ -1185,9 +1234,9 @@ private struct ContentView: View {
                   detail: isDirect ? "Normal internet modunda kapalı"
                       : (vpnRunning ? "Shadowsocks çalışıyor" : (model.status == nil ? "Bilinmiyor" : "Başlatılıyor")))
         Divider()
-        HealthRow(state: model.exitIP == nil ? .unknown : .good,
+        HealthRow(state: model.exitIP != nil ? .good : (model.exitError != nil ? .warn : .unknown),
                   title: "Çıkış IP doğrulaması",
-                  detail: model.exitIP.map { "Doğrulandı · \($0)" } ?? "Bu oturumda henüz test edilmedi")
+                  detail: model.exitIP.map { "IPv4 · \($0)" } ?? vpnExitText)
         Divider()
         HealthRow(state: serverHealth.state, title: "Sunucu erişimi", detail: serverHealth.detail)
         Divider()
@@ -1246,22 +1295,26 @@ private struct ContentView: View {
             Card("Mevcut bağlantı", symbol: "checkmark.shield") {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("VPN çıkış IP'si").font(AppFont.regular(12)).foregroundStyle(.secondary)
-                        Text(model.exitIP ?? (isDirect ? "Normal internet" : (vpnRunning ? "VPN açık" : "Bağlantı yok")))
+                        Text("İnternette görünen VPN IPv4").font(AppFont.regular(12)).foregroundStyle(.secondary)
+                        Text(vpnExitText)
                             .font(AppFont.bold(model.exitIP == nil ? 15 : 20))
                             .foregroundStyle(model.exitIP == nil ? .secondary : .primary)
                             .textSelection(.enabled)
+                        Text(vpnExitDetail)
+                            .font(AppFont.regular(11))
+                            .foregroundStyle(model.exitError == nil ? Color.secondary : Color.orange)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
                     Button { model.test() } label: {
-                        Label(model.exitIP == nil ? "Çıkış IP'sini ölç" : "Çıkış IP'sini yenile",
+                        Label(model.exitIP == nil ? "IP'yi ölç" : "IP'yi yenile",
                               systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(AppActionButtonStyle())
-                    .disabled(model.busy || !vpnRunning)
+                    .disabled(model.exitChecking || !vpnRunning || isDirect)
                 }
                 if isDirect || !vpnRunning {
-                    Label(isDirect ? "Normal internet açık; bu düğme kurulu VPN sunucusunu kontrol eder."
+                    Label(isDirect ? "Normal internet modunda VPN çıkış IP'si paylaşılmaz."
                                    : "VPN servisi çalışmıyor.",
                           systemImage: "info.circle")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
@@ -1822,6 +1875,28 @@ private struct ContentView: View {
 
     private var devicesPage: some View {
         VStack(alignment: .leading, spacing: 18) {
+            Card("IP adresleri", subtitle: "VPN çıkışı ve router'ın cihazlara verdiği yerel IPv4 adresleri.",
+                 symbol: "network") {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("İnternette görünen VPN IPv4")
+                            .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                        Text(vpnExitText)
+                            .font(AppFont.bold(model.exitIP == nil ? 15 : 20))
+                            .textSelection(.enabled)
+                        Text(vpnExitDetail)
+                            .font(AppFont.regular(11))
+                            .foregroundStyle(model.exitError == nil ? Color.secondary : Color.orange)
+                    }
+                    Spacer()
+                    if !isDirect {
+                        Button { model.test() } label: {
+                            Label("IP'yi yenile", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(model.exitChecking || !vpnRunning)
+                    }
+                }
+            }
             LazyVGrid(columns: columns, spacing: 12) {
                 StatCard(title: "Bağlı cihaz", value: "\(model.status?.devices.count ?? 0)",
                          caption: "", symbol: "laptopcomputer.and.iphone")
@@ -1860,6 +1935,7 @@ private struct ContentView: View {
         let live = model.deviceRates[device.mac]
         let maxToday = max(sortedDevices.compactMap(\.downloadToday).max() ?? 1, 1)
         let share = Double(device.downloadToday ?? 0) / Double(maxToday)
+        let localIP = device.ip.flatMap { $0.isEmpty ? nil : $0 } ?? "Henüz görünmüyor"
         return HStack(spacing: 14) {
             Image(systemName: deviceSymbol(device))
                 .font(.system(size: 15, weight: .semibold))
@@ -1873,6 +1949,11 @@ private struct ContentView: View {
                     Badge(text: isWifi ? "Wi-Fi" : "Kablolu", color: isWifi ? Theme.accent : .secondary)
                     if blocked { Badge(text: "Engelli", color: .red) }
                 }
+                Text("Yerel IPv4 · \(localIP)")
+                    .font(AppFont.medium(11))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .textSelection(.enabled)
             }
             Spacer(minLength: 12)
             if isWifi, let live, live > 50 * 1024 {

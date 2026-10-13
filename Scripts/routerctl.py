@@ -694,9 +694,20 @@ def select_node(tag=None):
     emit({'ok': True, 'note': 'Sunucu elle seçildi.' if tag else 'Otomatik seçim açıldı.'})
 
 
+def socks_ipv4_request(host, port):
+    try:
+        target_ip = socket.getaddrinfo(host, port, socket.AF_INET,
+                                       socket.SOCK_STREAM)[0][4][0]
+    except (OSError, IndexError) as exc:
+        raise RuntimeError('VPN çıkış testi için IPv4 adresi çözülemedi.') from exc
+    return (b'\x05\x01\x00\x01' + ipaddress.IPv4Address(target_ip).packed
+            + port.to_bytes(2, 'big'))
+
+
 def active_test(emit_result=True, remote_port=1080):
-    # A tunnel through the router's SOCKS listener verifies the real VPN exit.
+    # Wi-Fi clients route IPv4 through ss-redir. Test that same address family.
     setup()
+    request = socks_ipv4_request('ifconfig.me', 443)
     with socket.socket() as reservation:
         reservation.bind(('127.0.0.1', 0))
         local_port = reservation.getsockname()[1]
@@ -722,8 +733,7 @@ def active_test(emit_result=True, remote_port=1080):
         s.sendall(b'\x05\x01\x00')
         if s.recv(2) != b'\x05\x00':
             raise RuntimeError('Router SOCKS bağlantısı kurulamadı.')
-        host = b'ifconfig.me'
-        s.sendall(b'\x05\x01\x00\x03' + bytes([len(host)]) + host + b'\x01\xbb')
+        s.sendall(request)
         answer = s.recv(10)
         if len(answer) < 2 or answer[1] != 0:
             raise RuntimeError('VPN sunucusuna bağlanılamadı.')
@@ -737,7 +747,7 @@ def active_test(emit_result=True, remote_port=1080):
             data.extend(chunk)
         secure.close()
         body = bytes(data).split(b'\r\n\r\n', 1)[-1].decode('utf-8', 'replace').strip()
-        body = validated_exit_ip(body)
+        body = validated_exit_ip(body, version=4)
         if emit_result:
             emit({'ok': True, 'exitIP': body})
         return body
@@ -754,9 +764,12 @@ def active_test(emit_result=True, remote_port=1080):
             proc.kill()
 
 
-def validated_exit_ip(value):
+def validated_exit_ip(value, version=None):
     try:
-        return str(ipaddress.ip_address(value))
+        address = ipaddress.ip_address(value)
+        if version is not None and address.version != version:
+            raise ValueError('Unexpected IP family')
+        return str(address)
     except ValueError as exc:
         raise RuntimeError('VPN çıkış IP yanıtı geçersiz.') from exc
 

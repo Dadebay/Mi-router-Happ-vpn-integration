@@ -4,8 +4,8 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt/Shadowsocks VPN için macOS kontrol pane
 
 ## Durum
 
-- VPN durumu ve router üzerinden gerçek çıkış IP testi
-- Wi-Fi veri sayaçları ve bağlı cihazlar
+- VPN durumu ve router'ın Wi-Fi istemcileriyle aynı IPv4 yolu üzerinden gerçek çıkış IP testi
+- Wi-Fi veri sayaçları, bağlı cihazların yerel IPv4 adresleri ve doğrulanan ortak VPN çıkış IPv4 adresi
 - Kayıtlı Shadowsocks sunucuları, TCP gecikme ölçümleri, elle seçim ve otomatik seçim
 - Happ uygulamasından kopyalanan sunucu JSON'unu, `ss://` bağlantısını veya Shadowsocks içeren HTTPS aboneliğini kontrol etme ve router'a kurma
 - Abonelik bitiş tarihi ve süre dolunca doğrudan internete geçiş görevi
@@ -46,6 +46,8 @@ python3 -m py_compile Scripts/routerctl.py
 Uygulamayı paketlerken `Scripts/routerctl.py` ve `Scripts/RouterScripts` kaynaklarını ekleyin. `Scripts/build-app.sh` bunu yapar. Gilroy fontlarını kullanıcıya ait yerel font klasöründen paketleyin; lisanslı font dosyaları depoda bulunmaz.
 
 Girilen profil uygulamada Keychain'de, aktif sunucu parolası router'da yalnızca root erişimli dosyada saklanır. VPN kimlik bilgileri ve özel SSH anahtarı bu depoya eklenmez. Veri sayaçları aylık fatura miktarı değildir; router yeniden başladığında sıfırlanır.
+
+Uygulama, VPN modu açıldığında dış IPv4 adresini router'ın SOCKS çıkışından ölçer. Ölçüm başarısızsa önceki IP'yi güncelmiş gibi göstermez; Cihazlar sayfasındaki yerel IPv4 adresleri ise DHCP ve router komşu tablosundan bağımsız okunur. TCP gecikmesi tek başına çalışan internet çıkışını doğrulamaz.
 
 Tanı yedeği router'da `/etc/happvpn/backups/YYYY-MM-DD.tar.gz` olarak root erişimiyle saklanır. Ağ ve VPN yapılandırmaları da arşivde bulunduğundan arşivler gizli tutulmalıdır. Uygulama yalnızca tanı metnini gösterir veya dışa aktarır; VPN parolasını dışa aktarmaz. Görev her gün router UTC saatiyle 00:05'te çalışır, eski arşivleri 30 gün sonunda kaldırır, en fazla 30 arşiv ve toplam 384 KB tutar; overlay boş alanı 512 KB altına düşecekse en eskileri siler veya yeni yedeği atlar.
 
