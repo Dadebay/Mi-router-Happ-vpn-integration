@@ -6,6 +6,7 @@ a separate listener before it replaces the saved working configuration.
 """
 import argparse
 import base64
+import io
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.parse
 import urllib.request
@@ -24,7 +26,7 @@ HOST = '192.168.1.1'
 SSH_KEY = HOME / 'router_rsa'
 KNOWN_HOSTS = HOME / 'known_hosts'
 ROUTER_SCRIPTS = ('mode.sh', 'expiry-check.sh', 'probe-nodes.lua', 'usage-sample.lua',
-                  'dns-relay.lua')
+                  'dns-relay.lua', 'node-helper.lua', 'switch-node.sh')
 SUPPORTED_CIPHERS = frozenset({
     'aes-128-gcm', 'aes-192-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305',
     'xchacha20-ietf-poly1305', 'aes-128-cfb', 'aes-192-cfb', 'aes-256-cfb',
@@ -33,7 +35,7 @@ SUPPORTED_CIPHERS = frozenset({
 CRON_ENTRIES = (
     '*/5 * * * * /etc/happvpn/expiry-check.sh',
     '* * * * * /etc/happvpn/usage-sample.lua',
-    '*/30 * * * * /etc/happvpn/probe-nodes.lua',
+    '*/30 * * * * /etc/happvpn/switch-node.sh auto',
 )
 MAC_PATTERN = re.compile(r'[0-9a-f]{2}(?::[0-9a-f]{2}){5}')
 BLOCKED_FILE = '/etc/happvpn/blocked-macs'
@@ -90,11 +92,26 @@ def install_helpers():
                if not (source / name).is_file()]
     if missing:
         raise RuntimeError('Uygulama kurulum dosyaları eksik: ' + ', '.join(missing))
-    ssh('umask 077; mkdir -p /etc/happvpn; test -d /etc/happvpn', timeout=20)
+    ssh('umask 077; mkdir -p /etc/happvpn/profiles; '
+        'active=$(cat /etc/happvpn/active-outbound 2>/dev/null || true); '
+        'case "$active" in ss-*) suffix=${active#ss-}; '
+        'case "$suffix" in ""|*[!0-9]*) ;; *) '
+        'test -s "/etc/happvpn/profiles/$active.json" || '
+        'cp /etc/happvpn/ss-client.json "/etc/happvpn/profiles/$active.json";; esac;; esac; '
+        'test -s /etc/happvpn/selection-mode || printf auto > /etc/happvpn/selection-mode',
+        timeout=20)
     for name in ROUTER_SCRIPTS:
         content = (source / name).read_bytes()
+        staged = f'/etc/happvpn/.{name}.new'
+        if name.endswith('.sh'):
+            validate = f'sh -n {staged}'
+        elif name.endswith('.lua'):
+            validate = f'''lua5.3 -e 'assert(loadfile("{staged}"))' '''
+        else:
+            validate = f'test -s {staged}'
         ssh(f'umask 077; cat > /etc/happvpn/.{name}.new && '
             f'chmod 755 /etc/happvpn/.{name}.new && '
+            f'{validate} && '
             f'mv /etc/happvpn/.{name}.new /etc/happvpn/{name}',
             stdin=content, timeout=20)
     ssh('umask 077; cat > /etc/happvpn/happvpn.nft.vpn.ss && '
@@ -273,44 +290,109 @@ def install_profile(source, expires_at, selected_tag=None):
                    if node['tag'] == (selected_tag or 'ss-00')), None)
     if not chosen:
         raise ValueError('Seçilen sunucu bu profilde bulunamadı.')
-    node, config = chosen
-    ssh('umask 077; cat > /tmp/happ-ss-candidate.json',
-        stdin=json.dumps(config, ensure_ascii=False).encode('utf-8'))
-    # Probe the new server without interrupting the working listener or clients.
+    node, _ = chosen
+    previous_selection = ssh('cat /etc/happvpn/selection-mode 2>/dev/null || echo auto').decode('ascii').strip()
+    if previous_selection not in ('auto', 'manual'):
+        previous_selection = 'auto'
+    previous_mode = ssh('cat /etc/happvpn/mode 2>/dev/null || echo vpn').decode('ascii').strip()
+    switched = False
+    commit_started = False
+    success = False
+    # Pause automatic changes while the new profile set is staged and checked.
+    ssh('printf manual > /etc/happvpn/selection-mode')
     try:
-        ssh('ss-local -c /tmp/happ-ss-candidate.json -b 127.0.0.1 -l 11082 '
-            '-f /tmp/happ-ss-candidate.pid >/tmp/happ-ss-candidate.log 2>&1', timeout=15)
-        active_test(emit_result=False, remote_port=11082)
-    except Exception as exc:
-        _cleanup_candidate()
-        raise RuntimeError('Yeni sunucunun VPN çıkışı doğrulanamadı; çalışan profil korundu.') from exc
-    finally:
-        ssh('if [ -s /tmp/happ-ss-candidate.pid ]; then '
-            'kill $(cat /tmp/happ-ss-candidate.pid) 2>/dev/null || true; '
-            'rm -f /tmp/happ-ss-candidate.pid; fi', timeout=15)
-    ssh('cp /etc/happvpn/ss-client.json /etc/happvpn/ss-client.json.last-good')
-    try:
-        ssh('cp /tmp/happ-ss-candidate.json /etc/happvpn/ss-client.json && '
-            'chmod 600 /etc/happvpn/ss-client.json && '
-            '/etc/init.d/happ-ss restart', timeout=30)
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode='w', format=tarfile.USTAR_FORMAT) as bundle:
+            for item, config in profiles:
+                content = json.dumps(config, ensure_ascii=False).encode('utf-8')
+                entry = tarfile.TarInfo(f'{item["tag"]}.json')
+                entry.size = len(content)
+                entry.mode = 0o600
+                bundle.addfile(entry, io.BytesIO(content))
+        ssh('umask 077; rm -rf /etc/happvpn/profiles.stage; '
+            'mkdir /etc/happvpn/profiles.stage && '
+            'tar -xf - -C /etc/happvpn/profiles.stage',
+            stdin=archive.getvalue(), timeout=30)
+        nodes = [item for item, _ in profiles]
+        probes = ''.join(f"{item['tag']}\t{item['address']}\t{item['port']}\n"
+                         for item in nodes)
+        ssh('umask 077; cat > /etc/happvpn/nodes.json.stage',
+            stdin=json.dumps(nodes, ensure_ascii=False).encode('utf-8'))
+        ssh('umask 077; cat > /etc/happvpn/probes.tsv.stage',
+            stdin=probes.encode('utf-8'))
+
+        # The selected server must pass a real TLS request before the live service changes.
+        candidate = f'/etc/happvpn/profiles.stage/{node["tag"]}.json'
+        try:
+            ssh(f'ss-local -c {candidate} -b 127.0.0.1 -l 11082 '
+                '-f /tmp/happ-ss-candidate.pid >/tmp/happ-ss-candidate.log 2>&1', timeout=15)
+            active_test(emit_result=False, remote_port=11082)
+        except Exception as exc:
+            raise RuntimeError('Yeni sunucunun VPN çıkışı doğrulanamadı; çalışan profil korundu.') from exc
+        finally:
+            ssh('if [ -s /tmp/happ-ss-candidate.pid ]; then '
+                'kill $(cat /tmp/happ-ss-candidate.pid) 2>/dev/null || true; '
+                'rm -f /tmp/happ-ss-candidate.pid; fi', timeout=15)
+
+        ssh('cp /etc/happvpn/ss-client.json /etc/happvpn/ss-client.json.last-good')
+        ssh(f'cp {candidate} /etc/happvpn/ss-client.json.new && '
+            'chmod 600 /etc/happvpn/ss-client.json.new && '
+            'mv /etc/happvpn/ss-client.json.new /etc/happvpn/ss-client.json', timeout=20)
+        switched = True
+        ssh('/etc/init.d/happ-ss restart', timeout=30)
         exit_ip = active_test(emit_result=False)
-    except Exception as exc:
-        ssh('cp /etc/happvpn/ss-client.json.last-good /etc/happvpn/ss-client.json && '
-            '/etc/init.d/happ-ss restart', timeout=30)
+        ssh('/etc/happvpn/mode.sh vpn', timeout=45)
+
+        # Keep one previous generation for recovery if the metadata commit fails.
+        ssh('cp /etc/happvpn/nodes.json /etc/happvpn/nodes.json.last-good 2>/dev/null || true; '
+            'cp /etc/happvpn/probes.tsv /etc/happvpn/probes.tsv.last-good 2>/dev/null || true')
+        commit_started = True
+        ssh('set -e; umask 077; '
+            'rm -rf /etc/happvpn/profiles.previous; '
+            'if [ -d /etc/happvpn/profiles ]; then '
+            'mv /etc/happvpn/profiles /etc/happvpn/profiles.previous; fi; '
+            'mv /etc/happvpn/profiles.stage /etc/happvpn/profiles; '
+            'mv /etc/happvpn/nodes.json.stage /etc/happvpn/nodes.json; '
+            'mv /etc/happvpn/probes.tsv.stage /etc/happvpn/probes.tsv; '
+            f'printf %s {node["tag"]} > /etc/happvpn/active-outbound; '
+            f'printf %s {expires_at} > /etc/happvpn/expires-at; '
+            'printf auto > /etc/happvpn/selection-mode', timeout=30)
+        success = True
+    finally:
         _cleanup_candidate()
-        raise RuntimeError('Yeni profil açılamadı; önceki çalışan profil geri yüklendi.') from exc
-    nodes = [item for item, _ in profiles]
-    probes = ''.join(f"{item['tag']}\t{item['address']}\t{item['port']}\n"
-                     for item in nodes)
-    ssh('umask 077; cat > /etc/happvpn/nodes.json',
-        stdin=json.dumps(nodes, ensure_ascii=False).encode('utf-8'))
-    ssh('umask 077; cat > /etc/happvpn/probes.tsv', stdin=probes.encode('utf-8'))
-    ssh('umask 077; cat > /etc/happvpn/active-outbound', stdin=node['tag'].encode('ascii'))
-    ssh('umask 077; cat > /etc/happvpn/expires-at', stdin=str(expires_at).encode('ascii'))
-    ssh('/etc/happvpn/mode.sh vpn', timeout=45)
-    _cleanup_candidate()
+        if not success:
+            if commit_started:
+                try:
+                    ssh('if [ -d /etc/happvpn/profiles.previous ]; then '
+                        'rm -rf /etc/happvpn/profiles; '
+                        'mv /etc/happvpn/profiles.previous /etc/happvpn/profiles; fi; '
+                        'if [ -s /etc/happvpn/nodes.json.last-good ]; then '
+                        'cp /etc/happvpn/nodes.json.last-good /etc/happvpn/nodes.json; fi; '
+                        'if [ -s /etc/happvpn/probes.tsv.last-good ]; then '
+                        'cp /etc/happvpn/probes.tsv.last-good /etc/happvpn/probes.tsv; fi',
+                        timeout=20)
+                except Exception:
+                    pass
+            if switched:
+                try:
+                    ssh('cp /etc/happvpn/ss-client.json.last-good /etc/happvpn/ss-client.json && '
+                        '/etc/init.d/happ-ss restart', timeout=30)
+                    if previous_mode == 'direct':
+                        ssh('/etc/happvpn/mode.sh direct', timeout=45)
+                except Exception:
+                    pass
+            try:
+                ssh(f'printf {previous_selection} > /etc/happvpn/selection-mode')
+            except Exception:
+                pass
+    # A fresh measurement is available immediately; the cron job switches
+    # automatically after the next successful probe.
+    try:
+        ssh('/etc/happvpn/probe-nodes.lua', timeout=30)
+    except Exception:
+        pass
     emit({'ok': True, 'count': len(profiles), 'exitIP': exit_ip,
-          'note': 'Yeni sunucu router üzerinde doğrulandı ve kullanıma alındı.'})
+          'note': 'Sunucular kaydedildi. En düşük gecikmeli çalışan sunucu otomatik seçilecek.'})
 
 
 def _cpu_percent(first, second):
@@ -327,10 +409,10 @@ def _cpu_percent(first, second):
 
 
 def status():
-    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__BLOCKED__\\n'; cat /etc/happvpn/blocked-macs 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; if netstat -lnt | grep -q ':1080 ' && netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn; printf '\\n__CPU1__\\n'; head -n 1 /proc/stat; sleep 1; printf '\\n__CPU2__\\n'; head -n 1 /proc/stat; printf '\\n__MEMINFO__\\n'; cat /proc/meminfo'''
+    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__BLOCKED__\\n'; cat /etc/happvpn/blocked-macs 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SELECTION__\\n'; if test -x /etc/happvpn/switch-node.sh && crontab -l 2>/dev/null | grep -q '/etc/happvpn/switch-node.sh auto'; then cat /etc/happvpn/selection-mode 2>/dev/null || echo auto; else echo unavailable; fi; printf '\\n__CONFIGURED__\\n'; for file in /etc/happvpn/profiles/ss-*.json; do [ -s "$file" ] && basename "$file" .json; done; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; if netstat -lnt | grep -q ':1080 ' && netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn; printf '\\n__CPU1__\\n'; head -n 1 /proc/stat; sleep 1; printf '\\n__CPU2__\\n'; head -n 1 /proc/stat; printf '\\n__MEMINFO__\\n'; cat /proc/meminfo'''
     raw = ssh(command, timeout=35).decode('utf-8', 'replace')
     sections = {}
-    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|BLOCKED|PROBES|METRICS|NODES|ACTIVE|SYSTEM|CPU1|CPU2|MEMINFO)__\n', raw)
+    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|BLOCKED|PROBES|METRICS|NODES|ACTIVE|SELECTION|CONFIGURED|SYSTEM|CPU1|CPU2|MEMINFO)__\n', raw)
     for index in range(1, len(pieces) - 1, 2):
         sections[pieces[index]] = pieces[index + 1].strip()
     netdev = {}
@@ -395,12 +477,16 @@ def status():
                                            'last_try_time': int(columns[3])}
             except ValueError:
                 continue
+    configured = set(sections.get('CONFIGURED', '').splitlines())
+    active_outbound = sections.get('ACTIVE', '').strip() or 'happ-vpn'
     for node in nodes:
         observation = observations.get(node['tag'], tcp_probes.get(node['tag'], {}))
         node['alive'] = observation.get('alive')
         node['delay'] = observation.get('delay') if observation.get('alive') else None
         node['lastTry'] = observation.get('last_try_time')
-    healthy = [node for node in nodes if node.get('alive') and isinstance(node.get('delay'), (int, float))]
+        node['configured'] = node['tag'] in configured or node['tag'] == active_outbound
+    healthy = [node for node in nodes if node.get('configured') and node.get('alive')
+               and isinstance(node.get('delay'), (int, float))]
     best = min(healthy, key=lambda node: node['delay']) if healthy else None
     stats = metrics.get('stats', {}).get('inbound', {}).get('tproxy', {})
     vpn_bytes = ({'rx': stats.get('downlink', 0), 'tx': stats.get('uplink', 0)}
@@ -418,7 +504,9 @@ def status():
     expires_at = int(expiry_match.group(1)) if expiry_match else 0
     mode_match = re.search(r'(vpn|direct)\s*$', tail)
     mode = mode_match.group(1) if mode_match else 'vpn'
-    active_outbound = sections.get('ACTIVE', '').strip() or 'happ-vpn'
+    selection_mode = sections.get('SELECTION', '').strip()
+    if selection_mode not in ('auto', 'manual'):
+        selection_mode = 'unavailable'
     emit({'ok': True, 'vpnRunning': len(system) >= 2 and system[1].strip() == 'ready',
           'uptimeSeconds': float(system[0].split()[0]) if system else 0,
           'cpuPercent': _cpu_percent(sections.get('CPU1', ''), sections.get('CPU2', '')),
@@ -431,6 +519,7 @@ def status():
           'best': best['tag'] if best else 'happ-vpn',
           'fallback': active_outbound == 'happ-vpn',
           'activeOutbound': active_outbound, 'metricsAvailable': bool(metrics),
+          'selectionMode': selection_mode,
           'expiresAt': expires_at,
           'mode': mode,
           'updatedAt': int(time.time())})
@@ -526,6 +615,20 @@ def set_mode(mode):
     emit({'ok': True, 'note': 'Router internet modu değiştirildi.', 'mode': mode})
 
 
+def select_node(tag=None):
+    if tag is not None and not re.fullmatch(r'ss-\d{2,3}', tag):
+        raise ValueError('Sunucu seçimi geçersiz.')
+    available = ssh('test -x /etc/happvpn/switch-node.sh && '
+                    'test -s /etc/happvpn/node-helper.lua && echo ready || true',
+                    timeout=15).decode('ascii').strip()
+    if available != 'ready':
+        raise RuntimeError('Önce Router sayfasından yardımcıları güncelleyin.')
+    command = (f'/etc/happvpn/switch-node.sh manual {tag}' if tag else
+               '/etc/happvpn/switch-node.sh enable-auto')
+    ssh(command, timeout=180)
+    emit({'ok': True, 'note': 'Sunucu elle seçildi.' if tag else 'Otomatik seçim açıldı.'})
+
+
 def active_test(emit_result=True, remote_port=1080):
     # A tunnel through the router's SOCKS listener verifies the real VPN exit.
     setup()
@@ -588,6 +691,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['status', 'preview', 'test', 'apply', 'expiry',
                                             'mode-vpn', 'mode-direct', 'install', 'logs',
+                                            'select-node', 'auto-node',
                                             'block-device', 'unblock-device'])
     parser.add_argument('--url')
     parser.add_argument('--expires', type=int)
@@ -615,6 +719,12 @@ def main():
             set_expiry(args.expires)
         elif args.command in ('mode-vpn', 'mode-direct'):
             set_mode(args.command.removeprefix('mode-'))
+        elif args.command == 'select-node':
+            if not args.tag:
+                raise ValueError('Sunucu seçin.')
+            select_node(args.tag)
+        elif args.command == 'auto-node':
+            select_node()
         elif args.command in ('block-device', 'unblock-device'):
             set_device_blocked(args.mac, args.command == 'block-device')
     except Exception as exc:

@@ -37,6 +37,7 @@ private struct Node: Decodable, Identifiable {
     let alive: Bool?
     let delay: Double?
     let lastTry: Int?
+    let configured: Bool?
     var id: String { tag }
 }
 
@@ -57,6 +58,7 @@ private struct RouterStatus: Decodable {
     let best: String
     let fallback: Bool
     let activeOutbound: String
+    let selectionMode: String?
     let metricsAvailable: Bool
     let expiresAt: Int
     let mode: String
@@ -185,6 +187,7 @@ private final class DashboardModel: ObservableObject {
     @Published var lastRefresh: Date?
     @Published var exitIP: String?
     @Published var logs = ""
+    @Published var serverActionError: String?
     @Published var helperUpdate: HelperUpdateState = .idle
     @Published var deviceRates: [String: Double] = [:]
     @Published var expiration = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 6)) ?? Date()
@@ -267,6 +270,33 @@ private final class DashboardModel: ObservableObject {
                 notify(error.localizedDescription, .error)
                 loadLogs()
             }
+        }
+    }
+
+    func selectNode(_ tag: String? = nil) {
+        guard !busy else { return }
+        busy = true
+        serverActionError = nil
+        notify(tag == nil ? "En düşük gecikmeli sunucu seçiliyor…" : "Seçilen sunucu test ediliyor…")
+        Task {
+            do {
+                let data = try await Task.detached(priority: .utility) {
+                    try Backend.run(tag == nil ? "auto-node" : "select-node", tag: tag)
+                }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                if result.ok {
+                    notify(result.note ?? "Sunucu seçimi güncellendi", .success)
+                } else {
+                    let detail = result.error ?? "Sunucu değiştirilemedi."
+                    serverActionError = detail
+                    notify(detail, .error)
+                }
+            } catch {
+                serverActionError = error.localizedDescription
+                notify(error.localizedDescription, .error)
+            }
+            busy = false
+            refresh()
         }
     }
 
@@ -1116,7 +1146,9 @@ private struct ContentView: View {
                     DisclosureGroup(isExpanded: $showServerHelp) {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Happ'te çalışan sunucuyu seçip “Copy Server JSON” ile kopyala.")
-                            Text("ss:// ve Shadowsocks içeren HTTPS bağlantıları da desteklenir. happ:// bağlantısını önce Happ'te aç. Yalnızca VLESS içeren profiller desteklenmez.")
+                            Text("ss:// ve Shadowsocks içeren HTTPS bağlantıları desteklenir. happ:// bağlantısını önce Happ'te aç. Hysteria ve VLESS bu router'da desteklenmez.")
+                                .foregroundStyle(.secondary)
+                            Text("Birden fazla ss:// adresi için göz simgesini açıp her adresi ayrı satıra yapıştır.")
                                 .foregroundStyle(.secondary)
                         }
                         .font(AppFont.regular(12))
@@ -1172,11 +1204,33 @@ private struct ContentView: View {
                     subtitle: isDirect ? "Normal internet etkin" : nil,
                     symbol: "server.rack",
                     accessory: { Badge(text: "30 dk'da ölçüm", color: .secondary) }) {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 28, height: 28)
+                    .background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Otomatik seçim").font(AppFont.semiBold(13))
+                    Text("Erişilebilir en düşük ms")
+                        .font(AppFont.regular(11)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if model.status?.selectionMode == "unavailable" {
+                    Badge(text: "Yardımcılar gerekli", color: .orange)
+                } else if model.status?.selectionMode != "manual" {
+                    Badge(text: "Açık", color: Theme.accent)
+                } else {
+                    Button("Otomatiğe dön") { model.selectNode() }
+                        .disabled(model.busy || model.reachable != true)
+                }
+            }
+            .padding(12)
+            .background(Theme.accent.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
             if nodes.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "tray").font(.title2).foregroundStyle(.secondary)
                     Text("Henüz sunucu listesi yok").font(AppFont.semiBold(13))
-                    Text("Profil ekleyip sunucu kur.")
+                    Text("Çoklu Shadowsocks profili ekle.")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
@@ -1188,8 +1242,17 @@ private struct ContentView: View {
                     }
                 }
             }
+            if nodes.count == 1 {
+                Text("Diğer Shadowsocks sunucularını abonelikle ekle. Hysteria bu router'da çalışmaz.")
+                    .font(AppFont.regular(11)).foregroundStyle(.secondary)
+            }
+            if let error = model.serverActionError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(AppFont.medium(12)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             DisclosureGroup {
-                Text("ms, sunucuya bağlantı süresidir; VPN hızını göstermez. VPN'i yukarıdaki testle doğrula. Otomatik sunucu değişimi henüz etkin değil. “Ulaşılamıyor”, bağlantı kurulamadığı veya ölçüm olmadığı anlamına gelir.")
+                Text("ms, sunucuya TCP bağlantı süresidir; VPN hızını göstermez. Otomatik seçim yalnızca VPN çıkışı doğrulanan sunuculara geçer. “Ulaşılamıyor”, ölçüm olmadığı veya TCP bağlantısı kurulamadığı anlamına gelir.")
                     .font(AppFont.regular(12)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
@@ -1204,6 +1267,7 @@ private struct ContentView: View {
         let delay = node.delay ?? 0
         let isBest = model.status?.best == node.tag && alive
         let isActive = model.status?.activeOutbound == node.tag
+        let configured = node.configured == true || (node.configured == nil && isActive)
         return HStack(spacing: 12) {
             Circle().fill(alive ? latencyColor(delay) : Color.secondary.opacity(0.4))
                 .frame(width: 9, height: 9)
@@ -1212,19 +1276,26 @@ private struct ContentView: View {
             if isBest { Badge(text: "En düşük ms", color: Theme.accent) }
             Spacer()
             if alive {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.secondary.opacity(0.15))
-                        Capsule().fill(latencyColor(delay))
-                            .frame(width: max(8, proxy.size.width * (1 - min(delay, 600) / 600)))
-                    }
-                }
-                .frame(width: 70, height: 6)
                 Text("\(Int(delay)) ms")
                     .font(AppFont.semiBold(12)).monospacedDigit()
-                    .frame(width: 62, alignment: .trailing)
+                    .frame(width: 75, alignment: .trailing)
             } else {
-                Text("Ulaşılamıyor").font(AppFont.regular(12)).foregroundStyle(.secondary)
+                Text("n/a").font(AppFont.regular(12)).foregroundStyle(.secondary)
+                    .frame(width: 75, alignment: .trailing)
+            }
+            if isActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 48)
+                    .accessibilityLabel("Etkin")
+            } else if configured {
+                Button("Seç") { model.selectNode(node.tag) }
+                    .disabled(model.busy || model.reachable != true ||
+                              model.status?.selectionMode == "unavailable")
+                    .frame(width: 48)
+            } else {
+                Text("Profil gerekli")
+                    .font(AppFont.medium(11)).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 9)
