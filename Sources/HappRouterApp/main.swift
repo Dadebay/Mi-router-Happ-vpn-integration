@@ -766,9 +766,11 @@ private struct ContentView: View {
                 }
                 .frame(maxWidth: page == .devices ? 760 : 940, alignment: .leading)
                 .padding(.horizontal, 28)
-                .padding(.vertical, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .top)
             }
+            .ignoresSafeArea(.container, edges: .top)
             .buttonStyle(AppActionButtonStyle())
             .background(Color(nsColor: .windowBackgroundColor))
             .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
