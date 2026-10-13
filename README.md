@@ -21,7 +21,7 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt/Shadowsocks VPN için macOS kontrol pane
 
 **13 Ekim 2026 çalışan router sürümü:** Happ uygulamasından alınan Shadowsocks sunucu profili, Xiaomi Mi Router 4C üzerinde `ss-local` ve `ss-redir` ile çalışıyor. Router yeniden başlatıldıktan sonra servis otomatik açıldı. Android telefon `HappVPN` Wi-Fi ağına bağlandığında çıkış IP'si `78.232.59.122` olarak ve YouTube erişimiyle doğrulandı. DNS istekleri VPN içinden iletiliyor. `Scripts/happ-ss.init`, `Scripts/happ-ss.nft` ve `Scripts/mode.sh` bu çalışan yönlendirme düzeninin kaynak dosyalarıdır.
 
-**Güncel sunucu durumu:** Önceki Paris profili artık gerçek HTTPS çıkış testinde bağlantıyı kapatıyor. Router doğrudan internet modunda kalır; doğrulanmamış profille VPN moduna geçmez. FlyFrog'un şifreli `happ://crypt5` aboneliği Happ içinde sunucu ayarlarını gizliyor. FlyFrog'dan router uyumlu Shadowsocks bağlantısı veya sunucu JSON'u alınmadan bu abonelik router'a yüklenemez.
+**Güncel sunucu durumu:** Yeni HTTPS aboneliğindeki Shadowsocks profili ayrı bir SOCKS dinleyicisinde test edildi, ardından router'a kuruldu. Kurulum sonrası router VPN modunda; kurulu profilin gerçek HTTPS çıkış testi `78.232.60.20` IP'sini döndürdü. FlyFrog'un şifreli `happ://crypt5` aboneliği Happ içinde sunucu ayarlarını gizliyor. FlyFrog'dan router uyumlu Shadowsocks bağlantısı veya sunucu JSON'u alınmadan bu abonelik router'a yüklenemez.
 
 Sunucu parolası yalnızca router'daki `/etc/happvpn/ss-client.json` dosyasında tutulur; bu depoda bulunmaz. Güvenlik duvarındaki `6c:1f:f7:17:eb:39` MAC adresi kurulum sırasında Mac'in kablolu bağlantısını doğrudan internette tutmak için ayrılmıştır. Başka kurulumda bu adres uyarlanmalıdır. VPN yönlendiricisi durursa Wi-Fi istemcileri doğrudan WAN'a çıkamaz. Abonelik bitişini denetleyen mevcut görev, süre dolduğunda doğrudan moda geçer.
 
@@ -33,7 +33,7 @@ Shadowsocks sunucuları için TCP erişim testi 30 dakikada bir çalışır. Oto
 
 Uygulama router'a `192.168.1.1` adresinden SSH ile bağlanır. Yerel SSH anahtarını `~/.happ-router` altında kullanır. Mac'in Wi-Fi ayarlarını değiştirmez. Router'daki VPN ve süre dolumu görevi Mac kapalıyken çalışır.
 
-Happ macOS uygulamasında çalışan Shadowsocks sunucusunu seçip **Copy Server JSON** komutunu kullan. HappRouter'da **Panodan al**, **Profili kontrol et** ve **Sunucuyu değiştir** düğmelerine bas. Birden fazla sunucu için çoklu `ss://` profili veya Shadowsocks içeren HTTPS aboneliği ekle. Uygulama profilleri router'a kaydeder; VPN Ayarları içinden elle sunucu seçilebilir. Şifreli `happ://crypt5` bağlantıları doğrudan çözülemez; Happ içinden sunucu JSON'u alınmalıdır. Yalnızca VLESS veya Hysteria profilleri içeren abonelikler bu router üzerinde desteklenmez.
+Happ macOS uygulamasında çalışan Shadowsocks sunucusunu seçip **Copy Server JSON** komutunu kullan. HappRouter'da **Panodan al**, **Profili kontrol et**, **Yeni sunucuyu test et** ve **Test et ve kur** düğmelerine bas. Profil kontrolü yalnızca biçimi okur; yeni test, router'daki mevcut profili değiştirmeden gerçek HTTPS çıkışını doğrular. Birden fazla sunucu için çoklu `ss://` profili veya Shadowsocks içeren HTTPS aboneliği ekle. Uygulama profilleri router'a kaydeder; VPN Ayarları içinden elle sunucu seçilebilir. Şifreli `happ://crypt5` bağlantıları doğrudan çözülemez; Happ içinden sunucu JSON'u alınmalıdır. Yalnızca VLESS veya Hysteria profilleri içeren abonelikler bu router üzerinde desteklenmez.
 
 ## Geliştirme
 

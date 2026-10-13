@@ -76,6 +76,29 @@ class ServerSelectionTests(unittest.TestCase):
         ssh.assert_not_called()
 
 
+class CandidateProbeTests(unittest.TestCase):
+    def test_probe_checks_selected_server_without_changing_live_profile(self):
+        with patch.object(routerctl, 'ssh', return_value=b'') as ssh, \
+             patch.object(routerctl, 'active_test', return_value='203.0.113.1') as test_exit, \
+             patch.object(routerctl, 'emit') as emit:
+            routerctl.probe_profile(SAMPLE, 'ss-01')
+        config = json.loads(ssh.call_args_list[0].kwargs['stdin'])
+        self.assertEqual(config['server'], 'example.net')
+        commands = '\n'.join(call.args[0] for call in ssh.call_args_list)
+        self.assertNotIn('/etc/happvpn/', commands)
+        self.assertNotIn('pass456', commands)
+        self.assertIn('rm -f /tmp/happ-ss-probe.pid', commands)
+        test_exit.assert_called_once_with(emit_result=False, remote_port=11083)
+        self.assertEqual(emit.call_args.args[0]['exitIP'], '203.0.113.1')
+
+    def test_probe_failure_cleans_temporary_profile(self):
+        with patch.object(routerctl, 'ssh', return_value=b'') as ssh, \
+             patch.object(routerctl, 'active_test', side_effect=RuntimeError('TLS closed')):
+            with self.assertRaisesRegex(RuntimeError, 'TLS closed'):
+                routerctl.probe_profile(SAMPLE, 'ss-00')
+        self.assertIn('rm -f /tmp/happ-ss-probe.pid', ssh.call_args_list[-1].args[0])
+
+
 class DiagnosticBackupTests(unittest.TestCase):
     def test_archive_date_is_validated_before_ssh(self):
         with patch.object(routerctl, 'ssh') as ssh:

@@ -306,7 +306,35 @@ def parse_profiles(source):
 def node_preview(source):
     profiles = parse_profiles(source)
     emit({'ok': True, 'count': len(profiles), 'nodes': [node for node, _ in profiles],
-          'note': 'Sunucu profilleri okundu. Gerçek VPN testi kurulumdan önce yapılır.'})
+          'note': 'Sunucu profilleri okundu; bağlantı henüz test edilmedi.'})
+
+
+def probe_profile(source, selected_tag=None):
+    profiles = parse_profiles(source)
+    if len(profiles) > 1 and not selected_tag:
+        raise ValueError('Test edilecek sunucuyu listeden seçin.')
+    chosen = next(((node, config) for node, config in profiles
+                   if node['tag'] == (selected_tag or 'ss-00')), None)
+    if not chosen:
+        raise ValueError('Seçilen sunucu bu profilde bulunamadı.')
+    node, config = chosen
+    candidate = '/tmp/happ-ss-probe.json'
+    pid = '/tmp/happ-ss-probe.pid'
+    log = '/tmp/happ-ss-probe.log'
+    try:
+        ssh(f'umask 077; cat > {candidate} && chmod 600 {candidate}',
+            stdin=json.dumps(config, ensure_ascii=False).encode('utf-8'), timeout=20)
+        ssh(f'ss-local -c {candidate} -b 127.0.0.1 -l 11083 '
+            f'-f {pid} >{log} 2>&1', timeout=15)
+        try:
+            exit_ip = active_test(emit_result=False, remote_port=11083)
+        except Exception as exc:
+            raise RuntimeError(f'Yeni sunucunun VPN çıkışı doğrulanamadı: {exc}') from exc
+        emit({'ok': True, 'exitIP': exit_ip, 'tag': node['tag'],
+              'note': 'Yeni sunucu çalışıyor; router profili değiştirilmedi.'})
+    finally:
+        ssh(f'if [ -s {pid} ]; then kill $(cat {pid}) 2>/dev/null || true; fi; '
+            f'rm -f {pid} {candidate} {log}', timeout=15)
 
 
 def _cleanup_candidate():
@@ -728,7 +756,7 @@ def active_test(emit_result=True, remote_port=1080):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['status', 'preview', 'test', 'apply', 'expiry',
+    parser.add_argument('command', choices=['status', 'preview', 'profile-test', 'test', 'apply', 'expiry',
                                             'mode-vpn', 'mode-direct', 'install', 'logs',
                                             'backup-list', 'backup-now', 'backup-read',
                                             'select-node', 'auto-node',
@@ -752,12 +780,14 @@ def main():
             backup_now()
         elif args.command == 'backup-read':
             backup_read(args.date)
-        elif args.command in ('preview', 'apply'):
+        elif args.command in ('preview', 'profile-test', 'apply'):
             url = sys.stdin.read().strip() if args.url == '-' else args.url
             if not url:
                 raise ValueError('Abonelik adresini girin.')
             if args.command == 'preview':
                 node_preview(url)
+            elif args.command == 'profile-test':
+                probe_profile(url, args.tag)
             else:
                 install_profile(url, args.expires, args.tag)
         elif args.command == 'test':

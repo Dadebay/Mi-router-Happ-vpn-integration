@@ -186,6 +186,8 @@ private final class DashboardModel: ObservableObject {
     @Published var status: RouterStatus?
     @Published var previewNodes: [Node] = []
     @Published var selectedNodeTag = ""
+    @Published var candidateExitIP: String?
+    @Published var candidateError: String?
     @Published var subscription = SecretStore.read()
     @Published var showSubscription = false
     @Published var busy = false
@@ -437,10 +439,43 @@ private final class DashboardModel: ObservableObject {
                 if result.ok {
                     previewNodes = result.nodes ?? []
                     selectedNodeTag = previewNodes.first?.tag ?? ""
+                    candidateExitIP = nil
+                    candidateError = nil
                     SecretStore.write(profile)
-                    notify("\(result.count ?? 0) Shadowsocks sunucusu bulundu. Kurulumdan önce gerçek VPN çıkışı test edilecek.", .success)
+                    notify("\(result.count ?? 0) profil okundu. Bağlantıyı ayrıca test edin.", .info)
                 } else { notify(result.error ?? "Profil okunamadı", .error) }
             } catch { notify(error.localizedDescription, .error) }
+        }
+    }
+
+    func probeProfile() {
+        let profile = subscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !profile.isEmpty, !selectedNodeTag.isEmpty, !busy else { return }
+        busy = true
+        candidateExitIP = nil
+        candidateError = nil
+        notify("Yeni sunucunun internet çıkışı test ediliyor…")
+        Task {
+            defer { busy = false }
+            do {
+                let tag = selectedNodeTag
+                let data = try await Task.detached(priority: .utility) {
+                    try Backend.run("profile-test", input: profile, tag: tag)
+                }.value
+                let result = try JSONDecoder().decode(BackendResult.self, from: data)
+                if result.ok {
+                    candidateExitIP = result.exitIP
+                    notify("Yeni sunucu çalışıyor. Çıkış IP: \(result.exitIP ?? "doğrulandı")", .success)
+                } else {
+                    let message = result.error ?? "Yeni sunucu test edilemedi."
+                    candidateError = message
+                    notify(message, .error)
+                }
+            } catch {
+                let message = error.localizedDescription
+                candidateError = message
+                notify(message, .error)
+            }
         }
     }
 
@@ -1203,13 +1238,13 @@ private struct ContentView: View {
                     }
                     Spacer()
                     Button { model.test() } label: {
-                        Label("Test et", systemImage: "play.fill")
+                        Label("Kurulu sunucuyu test et", systemImage: "play.fill")
                     }
                     .buttonStyle(AppActionButtonStyle(prominent: true))
                     .disabled(model.busy || !vpnRunning)
                 }
-                if !vpnRunning {
-                    Label(isDirect ? "Önce Router sayfasından VPN modunu aç."
+                if isDirect || !vpnRunning {
+                    Label(isDirect ? "Normal internet açık; bu düğme kurulu VPN sunucusunu dener."
                                    : "VPN servisi çalışmıyor.",
                           systemImage: "info.circle")
                         .font(AppFont.regular(12)).foregroundStyle(.secondary)
@@ -1250,6 +1285,8 @@ private struct ContentView: View {
                         .onChange(of: model.subscription) { _, _ in
                             model.previewNodes = []
                             model.selectedNodeTag = ""
+                            model.candidateExitIP = nil
+                            model.candidateError = nil
                         }
                         Button { model.pasteProfile() } label: {
                             Label("Yapıştır", systemImage: "doc.on.clipboard")
@@ -1291,7 +1328,11 @@ private struct ContentView: View {
                         if model.previewNodes.count > 1 {
                             VStack(spacing: 0) {
                                 ForEach(model.previewNodes) { node in
-                                    Button { model.selectedNodeTag = node.tag } label: {
+                                    Button {
+                                        model.selectedNodeTag = node.tag
+                                        model.candidateExitIP = nil
+                                        model.candidateError = nil
+                                    } label: {
                                         HStack(spacing: 10) {
                                             Image(systemName: model.selectedNodeTag == node.tag ? "largecircle.fill.circle" : "circle")
                                                 .foregroundStyle(model.selectedNodeTag == node.tag ? Theme.accent : .secondary)
@@ -1309,8 +1350,23 @@ private struct ContentView: View {
                         } else if let only = model.previewNodes.first {
                             Label(only.name, systemImage: "server.rack").font(AppFont.medium(13))
                         }
+                        Button { model.probeProfile() } label: {
+                            Label("Yeni sunucuyu test et", systemImage: "play.fill")
+                        }
+                        .buttonStyle(AppActionButtonStyle(prominent: false))
+                        .disabled(model.busy)
+                        if let ip = model.candidateExitIP {
+                            Label("Çalışıyor · VPN çıkış IP: \(ip)", systemImage: "checkmark.circle.fill")
+                                .font(AppFont.medium(12)).foregroundStyle(.green)
+                        } else if let error = model.candidateError {
+                            Label(error, systemImage: "xmark.circle.fill")
+                                .font(AppFont.regular(12)).foregroundStyle(.red)
+                        } else {
+                            Text("Profil okundu; bağlantı henüz test edilmedi.")
+                                .font(AppFont.regular(12)).foregroundStyle(.secondary)
+                        }
                         Button { model.apply() } label: {
-                            Label("Sunucuyu değiştir", systemImage: "arrow.down.to.line")
+                            Label("Test et ve kur", systemImage: "arrow.down.to.line")
                         }
                         .buttonStyle(AppActionButtonStyle(prominent: true))
                         .disabled(model.busy)
