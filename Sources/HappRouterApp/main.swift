@@ -44,6 +44,9 @@ private struct RouterStatus: Decodable {
     let ok: Bool
     let vpnRunning: Bool
     let uptimeSeconds: Double
+    let cpuPercent: Double?
+    let memoryUsedBytes: Int64?
+    let memoryTotalBytes: Int64?
     let wifi: ByteCounter
     let wan: ByteCounter
     let vpnBytes: ByteCounter?
@@ -603,7 +606,6 @@ private struct HealthRow: View {
 /// Router modunu seçmek için büyük, tıklanabilir kart.
 private struct ModeCard: View {
     let title: String
-    let detail: String
     let symbol: String
     let tint: Color
     let selected: Bool
@@ -625,10 +627,7 @@ private struct ModeCard: View {
                         .foregroundStyle(selected ? tint : Color.secondary.opacity(0.5))
                 }
                 Text(title).font(AppFont.bold(15))
-                Text(detail).font(AppFont.regular(12)).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(selected ? "Şu an açık" : "Bu moda geç")
+                Text(selected ? "Açık" : "Seç")
                     .font(AppFont.semiBold(11))
                     .foregroundStyle(selected ? tint : .secondary)
             }
@@ -685,6 +684,7 @@ private struct ContentView: View {
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private let statColumns = [GridItem(.adaptive(minimum: 168), spacing: 12)]
+    private let systemColumns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
 
     private var page: AppPage { selectedPage ?? .overview }
     private var isDirect: Bool { model.status?.mode == "direct" }
@@ -796,7 +796,7 @@ private struct ContentView: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(page.title).font(AppFont.display(28))
-                if page != .devices {
+                if page != .devices && page != .router {
                     Text(page.subtitle).font(AppFont.regular(13)).foregroundStyle(.secondary)
                 }
             }
@@ -1282,17 +1282,15 @@ private struct ContentView: View {
     private var routerPage: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("İnternet paylaşım modu").font(AppFont.bold(16))
+                Text("İnternet modu").font(AppFont.bold(16))
                 HStack(alignment: .top, spacing: 12) {
                     ModeCard(title: "VPN modu",
-                             detail: "HappVPN ağındaki cihazlar Happ sunucusu üzerinden internete çıkar.",
                              symbol: "checkmark.shield.fill", tint: Theme.accent,
                              selected: !isDirect && model.status != nil,
                              disabled: model.busy || model.status == nil || !vpnRunning) {
                         model.changeMode("vpn")
                     }
                     ModeCard(title: "Normal internet",
-                             detail: "VPN kullanılmaz; router doğrudan kendi internet bağlantısını paylaşır.",
                              symbol: "network", tint: .blue,
                              selected: isDirect,
                              disabled: model.busy || model.status == nil) {
@@ -1307,46 +1305,32 @@ private struct ContentView: View {
             }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Trafik").font(AppFont.bold(16))
-                LazyVGrid(columns: statColumns, spacing: 12) {
+                    .help("Trafik sayaçları router yeniden başladığında sıfırlanır.")
+                LazyVGrid(columns: columns, spacing: 12) {
                     StatCard(title: "Wi-Fi trafiği", value: bytes((model.status?.wifi.rx ?? 0) + (model.status?.wifi.tx ?? 0)),
-                             caption: "Router açıldığından beri", symbol: "wifi")
+                             caption: "", symbol: "wifi")
                     StatCard(title: "İnternet (WAN)", value: bytes((model.status?.wan.rx ?? 0) + (model.status?.wan.tx ?? 0)),
-                             caption: "Router açıldığından beri", symbol: "network")
-                    StatCard(title: "VPN trafiği",
-                             value: model.status?.vpnBytes == nil ? "—" :
-                                bytes((model.status?.vpnBytes?.rx ?? 0) + (model.status?.vpnBytes?.tx ?? 0)),
-                             caption: "VPN başladığından beri", symbol: "arrow.up.arrow.down")
-                    StatCard(title: "Çalışma süresi", value: uptimeText,
-                             caption: "Son açılıştan beri", symbol: "clock")
-                }
-                Text("Sayaçlar aylık fatura miktarı değildir; router yeniden başladığında sıfırlanır.")
-                    .font(AppFont.regular(11)).foregroundStyle(.secondary)
-            }
-            Card("Ağ bilgileri", symbol: "wifi.router") {
-                VStack(spacing: 10) {
-                    InfoRow(label: "Router adresi", value: "192.168.1.1")
-                    Divider()
-                    InfoRow(label: "Wi-Fi ağı", value: "HappVPN")
-                    Divider()
-                    InfoRow(label: "İnternet modu", value: isDirect ? "Normal internet" : "VPN",
-                            valueColor: Theme.accent)
-                    Divider()
-                    InfoRow(label: "Shadowsocks servisi",
-                            value: vpnRunning ? "Çalışıyor" : "Çalışmıyor",
-                            valueColor: vpnRunning ? Theme.accent : .orange)
-                }
-            }
-            Card("Router kurulumu",
-                 subtitle: "Mac'i router'ın LAN portuna bağla. Mevcut OpenWrt ve Shadowsocks üzerinde ölçüm, kullanım sayacı ve abonelik süresi görevlerini yükler.",
-                 symbol: "wrench.and.screwdriver") {
-                HStack {
-                    Button { model.install() } label: {
-                        Label("Gerekli yardımcıları yükle", systemImage: "square.and.arrow.down.on.square")
+                             caption: "", symbol: "network")
+                    if let vpnBytes = model.status?.vpnBytes {
+                        StatCard(title: "VPN trafiği", value: bytes((vpnBytes.rx ?? 0) + (vpnBytes.tx ?? 0)),
+                                 caption: "", symbol: "arrow.up.arrow.down")
                     }
-                    .disabled(model.busy)
-                    Text("VPN ayarlarını ve sunucu profilini değiştirmez.")
-                        .font(AppFont.regular(12)).foregroundStyle(.secondary)
                 }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Sistem").font(AppFont.bold(16))
+                LazyVGrid(columns: systemColumns, spacing: 12) {
+                    StatCard(title: "CPU", value: cpuText, caption: "", symbol: "cpu")
+                    StatCard(title: "RAM", value: ramText, caption: ramDetail, symbol: "memorychip")
+                    StatCard(title: "Çalışma süresi", value: uptimeText, caption: "", symbol: "clock")
+                }
+            }
+            Card("Router yardımcıları", symbol: "wrench.and.screwdriver") {
+                Button { model.install() } label: {
+                    Label("Yardımcıları güncelle", systemImage: "arrow.down.circle")
+                }
+                .disabled(model.busy)
+                .help("Mevcut OpenWrt üzerindeki HappRouter betiklerini ve zamanlayıcıları günceller. Paket veya firmware yüklemez; VPN sunucu profilini değiştirmez.")
             }
         }
     }
@@ -1493,6 +1477,23 @@ private struct ContentView: View {
         let seconds = Int(model.status?.uptimeSeconds ?? 0)
         if seconds >= 86400 { return "\(seconds / 86400) gün" }
         return seconds >= 3600 ? "\(seconds / 3600) saat" : "\(max(1, seconds / 60)) dk"
+    }
+
+    private var cpuText: String {
+        guard let value = model.status?.cpuPercent else { return "—" }
+        return "\(Int(value.rounded()))%"
+    }
+
+    private var ramText: String {
+        guard let used = model.status?.memoryUsedBytes,
+              let total = model.status?.memoryTotalBytes, total > 0 else { return "—" }
+        return "\(Int((Double(used) * 100 / Double(total)).rounded()))%"
+    }
+
+    private var ramDetail: String {
+        guard let used = model.status?.memoryUsedBytes,
+              let total = model.status?.memoryTotalBytes, total > 0 else { return "" }
+        return "\(used / 1_048_576) / \(total / 1_048_576) MB"
     }
 
     private var activeRouteLabel: String {

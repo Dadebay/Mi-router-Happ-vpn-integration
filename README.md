@@ -11,6 +11,7 @@ Xiaomi Mi Router 4C üzerindeki OpenWrt/Shadowsocks VPN için macOS kontrol pane
 - Abonelik bitiş tarihi ve süre dolunca doğrudan internete geçiş görevi
 - Genel Bakış, VPN Ayarları, Router ve Cihazlar için ayrı gezinme sayfaları
 - Router sayfasından VPN/doğrudan internet modu arasında elle geçiş
+- Router sayfasında canlı CPU ve RAM kullanımı
 - Router sayfasında mevcut OpenWrt/Shadowsocks kurulumunun yardımcı dosyalarını ve zamanlayıcılarını tek düğmeyle yükleme; VPN sayfasında test hatası ve servis günlüklerini görüntüleme
 
 **Kurulum düğmesinin kapsamı:** Mac ile LAN üzerinden erişilen, SSH anahtarı tanıtılmış Xiaomi 4C üzerinde mevcut OpenWrt/Shadowsocks temelini denetler; yardımcı betikleri, servis dosyasını ve cron görevlerini yeniden yükler. İlk firmware kurulumu, SSH anahtarı tanıtma ve Shadowsocks paketlerinin yüklenmesi bu düğmenin kapsamı dışındadır. Eksik ön koşullar uygulamada açık hata olarak gösterilir. Kurulum sırasında mevcut sunucu profili ve internet modu korunur.

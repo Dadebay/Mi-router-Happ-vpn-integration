@@ -313,11 +313,24 @@ def install_profile(source, expires_at, selected_tag=None):
           'note': 'Yeni sunucu router üzerinde doğrulandı ve kullanıma alındı.'})
 
 
+def _cpu_percent(first, second):
+    try:
+        start, end = (sample.split()[1:9] for sample in (first, second))
+        if len(start) < 5 or len(end) < 5:
+            return None
+        start, end = [int(value) for value in start], [int(value) for value in end]
+        elapsed = sum(end) - sum(start)
+        idle = (end[3] + end[4]) - (start[3] + start[4])
+        return round(max(0, min(100, 100 * (elapsed - idle) / elapsed)), 1) if elapsed > 0 else None
+    except ValueError:
+        return None
+
+
 def status():
-    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__BLOCKED__\\n'; cat /etc/happvpn/blocked-macs 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; if netstat -lnt | grep -q ':1080 ' && netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn'''
+    command = '''printf '__NETDEV__\\n'; cat /proc/net/dev; printf '\\n__LEASES__\\n'; cat /tmp/dhcp.leases 2>/dev/null; printf '\\n__STATIONS__\\n'; iw dev phy0-ap0 station dump 2>/dev/null; printf '\\n__NEIGH__\\n'; ip neigh show dev br-lan; printf '\\n__USAGE__\\n'; cat /tmp/happvpn/usage-today.tsv 2>/dev/null; printf '\\n__BLOCKED__\\n'; cat /etc/happvpn/blocked-macs 2>/dev/null; printf '\\n__PROBES__\\n'; cat /tmp/happvpn/probe-results.tsv 2>/dev/null; printf '\\n__METRICS__\\n'; printf '\\n__NODES__\\n'; cat /etc/happvpn/nodes.json 2>/dev/null; printf '\\n__ACTIVE__\\n'; cat /etc/happvpn/active-outbound 2>/dev/null || echo happ-vpn; printf '\\n__SYSTEM__\\n'; cat /proc/uptime; if netstat -lnt | grep -q ':1080 ' && netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi; cat /etc/happvpn/expires-at 2>/dev/null || echo 0; cat /etc/happvpn/mode 2>/dev/null || echo vpn; printf '\\n__CPU1__\\n'; head -n 1 /proc/stat; sleep 1; printf '\\n__CPU2__\\n'; head -n 1 /proc/stat; printf '\\n__MEMINFO__\\n'; cat /proc/meminfo'''
     raw = ssh(command, timeout=35).decode('utf-8', 'replace')
     sections = {}
-    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|BLOCKED|PROBES|METRICS|NODES|ACTIVE|SYSTEM)__\n', raw)
+    pieces = re.split(r'__(NETDEV|LEASES|STATIONS|NEIGH|USAGE|BLOCKED|PROBES|METRICS|NODES|ACTIVE|SYSTEM|CPU1|CPU2|MEMINFO)__\n', raw)
     for index in range(1, len(pieces) - 1, 2):
         sections[pieces[index]] = pieces[index + 1].strip()
     netdev = {}
@@ -393,6 +406,12 @@ def status():
     vpn_bytes = ({'rx': stats.get('downlink', 0), 'tx': stats.get('uplink', 0)}
                  if metrics else None)
     system = sections.get('SYSTEM', '').splitlines()
+    memory = {match.group(1): int(match.group(2)) for match in re.finditer(
+        r'(?m)^(MemTotal|MemAvailable|MemFree|Buffers|Cached):\s*(\d+)\s+kB',
+        sections.get('MEMINFO', ''))}
+    memory_total = memory.get('MemTotal', 0)
+    memory_available = memory.get('MemAvailable', memory.get('MemFree', 0)
+                                  + memory.get('Buffers', 0) + memory.get('Cached', 0))
     # Router marker files may have no trailing newline; parse fields separately.
     tail = sections.get('SYSTEM', '')
     expiry_match = re.search(r'(?m)^([0-9]{10})(vpn|direct)?$', tail)
@@ -402,6 +421,9 @@ def status():
     active_outbound = sections.get('ACTIVE', '').strip() or 'happ-vpn'
     emit({'ok': True, 'vpnRunning': len(system) >= 2 and system[1].strip() == 'ready',
           'uptimeSeconds': float(system[0].split()[0]) if system else 0,
+          'cpuPercent': _cpu_percent(sections.get('CPU1', ''), sections.get('CPU2', '')),
+          'memoryUsedBytes': max(0, memory_total - memory_available) * 1024 if memory_total else None,
+          'memoryTotalBytes': memory_total * 1024 if memory_total else None,
           'wifi': netdev.get('phy0-ap0', {}), 'wan': netdev.get('eth0.2', {}),
           'vpnBytes': vpn_bytes, 'devices': devices, 'blockedMACs': blocked_macs,
           'nodes': nodes,
