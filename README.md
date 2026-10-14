@@ -2,6 +2,8 @@
 
 Xiaomi Mi Router 4C üzerindeki OpenWrt/Shadowsocks VPN için macOS kontrol paneli.
 
+Android için router'a doğrudan SSH ile bağlanan VPN yönetimi APK'sı da `android/` içinde bulunur. Kurulum ve telefon eşleştirme adımları için [Android kılavuzuna](android/README.md) bakın.
+
 ## Durum
 
 - VPN durumu ve router'ın Wi-Fi istemcileriyle aynı IPv4 yolu üzerinden gerçek çıkış IP testi
