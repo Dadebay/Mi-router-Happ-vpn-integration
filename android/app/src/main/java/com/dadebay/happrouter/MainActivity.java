@@ -60,6 +60,7 @@ public final class MainActivity extends Activity {
     private TextView previewSummary;
     private TextView testedText;
     private LinearLayout pairingCard;
+    private Button revealKeyButton;
     private LinearLayout savedNodes;
     private LinearLayout previewSection;
     private RadioGroup previewChoices;
@@ -130,6 +131,13 @@ public final class MainActivity extends Activity {
         pairingKey.setTextIsSelectable(true);
         pairingKey.setPadding(dp(10), dp(10), dp(10), dp(10));
         pairingKey.setBackground(rounded(BG, 10, BORDER));
+        pairingKey.setVisibility(View.GONE);
+        revealKeyButton = button("Açık anahtarı göster", false, () -> {
+            boolean show = pairingKey.getVisibility() != View.VISIBLE;
+            pairingKey.setVisibility(show ? View.VISIBLE : View.GONE);
+            revealKeyButton.setText(show ? "Açık anahtarı gizle" : "Açık anahtarı göster");
+        });
+        pairingCard.addView(revealKeyButton);
         pairingCard.addView(pairingKey);
         LinearLayout pairingActions = row();
         pairingActions.setPadding(0, dp(10), 0, 0);
@@ -227,6 +235,9 @@ public final class MainActivity extends Activity {
             if (expiryInput.getText().length() == 0 && status.expiry > 0)
                 expiryInput.setText(Instant.ofEpochSecond(status.expiry)
                         .atZone(ZoneId.systemDefault()).toLocalDate().toString());
+        }, error -> {
+            connectionText.setText("Router'a bağlanılamadı · HappVPN Wi-Fi bağlantısını kontrol et.");
+            pairingCard.setVisibility(View.VISIBLE);
         });
     }
 
@@ -365,6 +376,10 @@ public final class MainActivity extends Activity {
     }
 
     private <T> void background(Callable<T> task, Consumer<T> success) {
+        background(task, success, null);
+    }
+
+    private <T> void background(Callable<T> task, Consumer<T> success, Consumer<Exception> failure) {
         if (busy) return;
         setBusy(true);
         worker.execute(() -> {
@@ -379,6 +394,7 @@ public final class MainActivity extends Activity {
                     setBusy(false);
                     String message = error.getMessage();
                     showMessage(message == null ? "İşlem tamamlanamadı." : message, ERROR);
+                    if (failure != null) failure.accept(error);
                     if (routerStatus == null) pairingCard.setVisibility(View.VISIBLE);
                 });
             }
