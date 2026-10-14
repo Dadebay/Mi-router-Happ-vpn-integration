@@ -44,6 +44,9 @@ public final class MainActivity extends Activity {
     private static final int ERROR = Color.rgb(205, 56, 70);
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private Typeface regularFont;
+    private Typeface semiboldFont;
+    private Typeface boldFont;
     private DeviceIdentity identity;
     private SecretPrefs secrets;
     private RouterGateway gateway;
@@ -76,6 +79,9 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        regularFont = getResources().getFont(R.font.gilroy_regular);
+        semiboldFont = getResources().getFont(R.font.gilroy_semibold);
+        boldFont = getResources().getFont(R.font.gilroy_bold);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
@@ -293,6 +299,7 @@ public final class MainActivity extends Activity {
             radio.setText(node.name);
             radio.setTextSize(14);
             radio.setTextColor(DARK);
+            radio.setTypeface(regularFont);
             radio.setPadding(dp(4), dp(7), 0, dp(7));
             radio.setButtonTintList(android.content.res.ColorStateList.valueOf(BLUE));
             radio.setOnClickListener(view -> {
@@ -452,7 +459,7 @@ public final class MainActivity extends Activity {
         view.setText(value);
         view.setTextSize(size);
         view.setTextColor(color);
-        view.setTypeface(Typeface.DEFAULT, weight);
+        view.setTypeface(weight == Typeface.BOLD ? boldFont : regularFont);
         return view;
     }
 
@@ -460,6 +467,7 @@ public final class MainActivity extends Activity {
         EditText view = new EditText(this);
         view.setSingleLine(true);
         view.setTextSize(14);
+        view.setTypeface(regularFont);
         view.setHint(hint);
         view.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         view.setTransformationMethod(PasswordTransformationMethod.getInstance());
@@ -473,7 +481,7 @@ public final class MainActivity extends Activity {
         button.setAllCaps(false);
         button.setText(label);
         button.setTextSize(13);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setTypeface(semiboldFont);
         button.setTextColor(prominent ? Color.WHITE : BLUE);
         button.setPadding(dp(13), dp(7), dp(13), dp(7));
         button.setMinHeight(dp(42));
