@@ -81,7 +81,10 @@ final class RouterGateway {
                     + "&& netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi", 15));
             if ("vpn".equals(value.mode)) {
                 try { value.exitIp = ssh.exec("/etc/happvpn/node-helper.lua check 1080", 25); }
-                catch (Exception ignored) { value.exitIp = null; }
+                catch (Exception error) {
+                    ErrorReport.record(context, error);
+                    value.exitIp = null;
+                }
             }
             return value;
         }
@@ -149,7 +152,10 @@ final class RouterGateway {
         if (ranked.isEmpty()) throw new Exception(context.getString(R.string.servers_unreachable));
         for (VpnProfile profile : ranked) {
             try { return new Candidate(profile, testCandidate(profile)); }
-            catch (Exception ignored) { /* Try the next reachable server. */ }
+            catch (Exception error) {
+                ErrorReport.record(context, error);
+                // Try the next reachable server.
+            }
         }
         throw new Exception(context.getString(R.string.vpn_exit_unverified));
     }

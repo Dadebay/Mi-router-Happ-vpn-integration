@@ -4,7 +4,7 @@ Bu kılavuzu router'ın yanındaki kişiye gönderin. Bilgisayar gerekmez; telef
 
 ## 1. Uygulamayı kur
 
-[HappRouter Android APK dosyasını indir](https://github.com/Dadebay/Mi-router-Happ-vpn-integration/raw/refs/heads/main/releases/HappRouter-Android-v0.3.0.apk). Telefonda dosyayı açın. Android isterse dosyayı açtığınız uygulamaya **Bilinmeyen uygulamaları yükleme** izni verin. Uygulama adı **HappRouter**. Ana ekranın üstündeki **TM / RU / EN** düğmeleriyle Türkmence, Rusça veya İngilizce seçebilirsiniz; seçim telefonda saklanır. Üstteki **Adım adım rehberi aç** düğmesi bu anlatımı seçilen dilde uygulamanın içinde gösterir.
+[HappRouter Android APK dosyasını indir](https://github.com/Dadebay/Mi-router-Happ-vpn-integration/raw/refs/heads/main/releases/HappRouter-Android-v0.3.1.apk). Telefonda dosyayı açın. Android isterse dosyayı açtığınız uygulamaya **Bilinmeyen uygulamaları yükleme** izni verin. Uygulama adı **HappRouter**. Ana ekranın üstündeki **TM / RU / EN** düğmeleriyle Türkmence, Rusça veya İngilizce seçebilirsiniz; seçim telefonda saklanır. Üstteki **Adım adım rehberi aç** düğmesi bu anlatımı seçilen dilde uygulamanın içinde gösterir.
 
 ## 2. Router'a bağlan
 
@@ -36,3 +36,7 @@ Parola ile SSH girişi kapalıysa uygulamadaki **Açık anahtarı göster → Ko
 **Güvenlik:** Abonelik adreslerini, router parolasını veya özel SSH anahtarını kimseye göndermeyin. Açık SSH anahtarı `ssh-rsa` ile başlar ve eşleştirme için paylaşılabilir.
 
 OpenWrt'nin [SSH anahtarı ekleme yönergesi](https://openwrt.org/docs/guide-user/security/dropbear.public-key.auth) LuCI adımlarını gösterir.
+
+## Hata raporunu gönder
+
+Uygulamada router bağlantı kartındaki **Gmail arkaly hata hasabatyny iber / Отправить отчёт через Gmail / Send error report via Gmail** düğmesine basın. Gmail, alıcısı `dadebaygurbanow333@gmail.com` olan yeni bir ileti açar ve son 30 günün en fazla 100 hata kaydını TXT dosyası olarak ekler. Göndermeden önce dosyayı kontrol edip Gmail’de **Gönder** düğmesine basın. Gmail yüklü değilse başka bir e-posta uygulaması seçilebilir. Abonelik bağlantıları ve anahtarlar hata kaydında gizlenir.

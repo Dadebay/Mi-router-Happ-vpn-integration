@@ -153,4 +153,9 @@
     <string name="parser_password">Invalid server password.</string>
     <string name="parser_max_servers">Up to 200 servers are supported.</string>
     <string name="parser_ss_plugin">Shadowsocks servers with plugins are unsupported.</string>
+    <string name="send_error_report">Send error report via Gmail</string>
+    <string name="report_subject">HappRouter error report</string>
+    <string name="report_body">Diagnostic TXT file attached. Please review it before sending.</string>
+    <string name="report_chooser">Send error report</string>
+    <string name="report_open_failed">Could not open email app or create report.</string>
 </resources>

@@ -16,8 +16,8 @@ android {
         applicationId 'com.dadebay.happrouter'
         minSdk 26
         targetSdk 34
-        versionCode 4
-        versionName '0.3.0'
+        versionCode 5
+        versionName '0.3.1'
     }
 
     compileOptions {
@@ -47,6 +47,7 @@ android {
 }
 
 dependencies {
+    implementation 'androidx.core:core:1.13.1'
     implementation 'com.github.mwiede:jsch:2.28.8'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'

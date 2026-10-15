@@ -120,6 +120,7 @@ public final class GuideActivity extends AppLanguage.Screen {
             clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.key_clip_label), key));
             Toast.makeText(this, R.string.guide_key_copied, Toast.LENGTH_SHORT).show();
         } catch (Exception error) {
+            ErrorReport.record(this, error);
             Toast.makeText(this, R.string.guide_key_failed, Toast.LENGTH_LONG).show();
         }
     }

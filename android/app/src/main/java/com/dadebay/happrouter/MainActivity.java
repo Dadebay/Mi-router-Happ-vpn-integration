@@ -3,12 +3,14 @@ package com.dadebay.happrouter;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
+import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
@@ -24,6 +26,9 @@ import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.core.content.FileProvider;
+
+import java.io.File;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -163,7 +168,10 @@ public final class MainActivity extends AppLanguage.Screen {
                 RouterAddress.save(this, routerIpInput.getText().toString().trim());
                 routerStatus = null;
                 refreshStatus();
-            } catch (Exception error) { showMessage(UiError.message(this, error), ERROR); }
+            } catch (Exception error) {
+                ErrorReport.record(this, error);
+                showMessage(UiError.message(this, error), ERROR);
+            }
         }));
 
         LinearLayout status = card(page);
@@ -176,6 +184,12 @@ public final class MainActivity extends AppLanguage.Screen {
         connectionText = text(getString(R.string.checking), 14, MUTED, Typeface.NORMAL);
         connectionText.setPadding(0, dp(12), 0, 0);
         status.addView(connectionText);
+        Button reportButton = button(getString(R.string.send_error_report), false, this::sendErrorReport);
+        LinearLayout.LayoutParams reportSpace = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        reportSpace.gravity = Gravity.END;
+        reportSpace.topMargin = dp(9);
+        status.addView(reportButton, reportSpace);
         modeRow = row();
         modeRow.setPadding(0, dp(12), 0, 0);
         status.addView(modeRow);
@@ -470,6 +484,7 @@ public final class MainActivity extends AppLanguage.Screen {
                 secrets.write("first", first.trim());
                 secrets.write("second", second.trim());
             } catch (Exception error) {
+                ErrorReport.record(this, error);
                 showMessage(getString(R.string.save_subscriptions_failed), ERROR);
             }
             renderPreview();
@@ -530,6 +545,7 @@ public final class MainActivity extends AppLanguage.Screen {
             LocalDate day = LocalDate.parse(expiryInput.getText().toString(), DateTimeFormatter.ISO_LOCAL_DATE);
             expiry = day.atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toEpochSecond();
         } catch (Exception error) {
+            ErrorReport.record(this, error);
             showMessage(getString(R.string.invalid_expiry), ERROR);
             return;
         }
@@ -573,6 +589,32 @@ public final class MainActivity extends AppLanguage.Screen {
                 current.getYear(), current.getMonthValue() - 1, current.getDayOfMonth()).show();
     }
 
+    private void sendErrorReport() {
+        try {
+            File report = ErrorReport.export(this);
+            Uri attachment = FileProvider.getUriForFile(this,
+                    getPackageName() + ".reports", report);
+            Intent email = new Intent(Intent.ACTION_SEND);
+            email.setType("text/plain");
+            email.setPackage("com.google.android.gm");
+            email.putExtra(Intent.EXTRA_EMAIL, new String[] {"dadebaygurbanow333@gmail.com"});
+            email.putExtra(Intent.EXTRA_SUBJECT, getString(R.string.report_subject));
+            email.putExtra(Intent.EXTRA_TEXT, getString(R.string.report_body));
+            email.putExtra(Intent.EXTRA_STREAM, attachment);
+            email.setClipData(ClipData.newUri(getContentResolver(), report.getName(), attachment));
+            email.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try {
+                startActivity(email);
+            } catch (ActivityNotFoundException noGmail) {
+                email.setPackage(null);
+                startActivity(Intent.createChooser(email, getString(R.string.report_chooser)));
+            }
+        } catch (Exception error) {
+            ErrorReport.record(this, error);
+            showMessage(getString(R.string.report_open_failed), ERROR);
+        }
+    }
+
     private <T> void background(Callable<T> task, Consumer<T> success) {
         background(task, success, null);
     }
@@ -588,6 +630,7 @@ public final class MainActivity extends AppLanguage.Screen {
                     success.accept(value);
                 });
             } catch (Exception error) {
+                ErrorReport.record(this, error);
                 runOnUiThread(() -> {
                     setBusy(false);
                     showMessage(UiError.message(this, error), ERROR);

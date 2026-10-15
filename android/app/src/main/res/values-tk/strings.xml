@@ -153,4 +153,9 @@
     <string name="parser_password">Serweriň paroly nädogry.</string>
     <string name="parser_max_servers">Iň köp 200 serwer goldanylýar.</string>
     <string name="parser_ss_plugin">Plaginli Shadowsocks serwerleri goldanylmaýar.</string>
+    <string name="send_error_report">Gmail arkaly hata hasabatyny iber</string>
+    <string name="report_subject">HappRouter hata hasabaty</string>
+    <string name="report_body">Diagnostika TXT faýly goşuldy. Ibermezden öň ony barlaň.</string>
+    <string name="report_chooser">Hata hasabatyny iber</string>
+    <string name="report_open_failed">E-poçtany açyp ýa-da hasabaty döredip bolmady.</string>
 </resources>

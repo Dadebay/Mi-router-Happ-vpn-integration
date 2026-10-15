@@ -16,9 +16,11 @@ import javax.crypto.spec.GCMParameterSpec;
 
 final class SecretPrefs {
     private static final String KEY_ALIAS = "HappRouterSubscriptions";
+    private final Context context;
     private final SharedPreferences preferences;
 
     SecretPrefs(Context context) {
+        this.context = context;
         preferences = context.getSharedPreferences("subscription_secrets", Context.MODE_PRIVATE);
     }
 
@@ -46,7 +48,8 @@ final class SecretPrefs {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, iv));
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
-        } catch (Exception ignored) {
+        } catch (Exception error) {
+            ErrorReport.record(context, error);
             return "";
         }
     }
