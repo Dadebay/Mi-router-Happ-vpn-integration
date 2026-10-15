@@ -9,7 +9,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 final class RouterGateway {
     static final class SavedNode {
@@ -32,7 +35,18 @@ final class RouterGateway {
         String selection;
         long expiry;
         String exitIp;
+        boolean vpnRunning;
+        RouterMetrics metrics;
         final List<SavedNode> nodes = new ArrayList<>();
+    }
+
+    static final class Candidate {
+        final VpnProfile profile;
+        final String exitIp;
+        Candidate(VpnProfile profile, String exitIp) {
+            this.profile = profile;
+            this.exitIp = exitIp;
+        }
     }
 
     private final Context context;
@@ -46,6 +60,7 @@ final class RouterGateway {
     Status status() throws Exception {
         try (RouterSsh ssh = new RouterSsh(context, identity)) {
             Status value = new Status();
+            value.metrics = RouterMetrics.parse(ssh.exec(RouterMetrics.command(), 40));
             value.mode = ssh.exec("cat /etc/happvpn/mode 2>/dev/null || echo vpn", 15);
             value.active = ssh.exec("cat /etc/happvpn/active-outbound 2>/dev/null || true", 15);
             value.selection = ssh.exec("cat /etc/happvpn/selection-mode 2>/dev/null || echo auto", 15);
@@ -56,8 +71,14 @@ final class RouterGateway {
             for (int i = 0; i < array.length(); i++) {
                 JSONObject node = array.optJSONObject(i);
                 if (node == null) continue;
-                value.nodes.add(new SavedNode(node.optString("tag"), node.optString("name"), null, null));
+                String tag = node.optString("tag");
+                value.nodes.add(new SavedNode(tag, node.optString("name"),
+                        value.metrics.delays.get(tag),
+                        value.metrics.unavailableNodes.contains(tag) ? false
+                                : value.metrics.delays.containsKey(tag) ? true : null));
             }
+            value.vpnRunning = "ready".equals(ssh.exec("if netstat -lnt | grep -q ':1080 ' "
+                    + "&& netstat -lnt | grep -q ':12345 '; then echo ready; else echo starting; fi", 15));
             if ("vpn".equals(value.mode)) {
                 try { value.exitIp = ssh.exec("/etc/happvpn/node-helper.lua check 1080", 25); }
                 catch (Exception ignored) { value.exitIp = null; }
@@ -84,6 +105,53 @@ final class RouterGateway {
                 catch (Exception ignored) { }
             }
         }
+    }
+
+    Candidate bestCandidate(List<VpnProfile> profiles) throws Exception {
+        if (profiles.isEmpty()) throw new IllegalArgumentException("Sunucu listesi boş.");
+        List<VpnProfile> ranked = new ArrayList<>();
+        if (profiles.size() == 1) ranked.add(profiles.get(0));
+        else {
+            StringBuilder input = new StringBuilder();
+            Map<String, VpnProfile> byTag = new HashMap<>();
+            for (VpnProfile profile : profiles) {
+                input.append(profile.tag).append('\t').append(profile.server).append('\t')
+                        .append(profile.port).append('\n');
+                byTag.put(profile.tag, profile);
+            }
+            Map<VpnProfile, Integer> delays = new HashMap<>();
+            try (RouterSsh ssh = new RouterSsh(context, identity)) {
+                ssh.write("/tmp/happ-mobile-probes.tsv", bytes(input.toString()));
+                ssh.write("/tmp/happ-mobile-probes.lua", readAsset("probe-nodes.lua"));
+                try {
+                    String result = ssh.exec("lua5.3 /tmp/happ-mobile-probes.lua "
+                            + "/tmp/happ-mobile-probes.tsv /tmp/happ-mobile-probes.results "
+                            + "&& cat /tmp/happ-mobile-probes.results",
+                            Math.max(30, Math.min(450, profiles.size() * 3 + 10)));
+                    for (String line : result.split("\\n")) {
+                        String[] parts = line.split("\\t");
+                        if (parts.length < 3 || !"1".equals(parts[1])) continue;
+                        VpnProfile profile = byTag.get(parts[0]);
+                        if (profile == null) continue;
+                        try { delays.put(profile, Integer.parseInt(parts[2])); }
+                        catch (NumberFormatException ignored) { }
+                    }
+                } finally {
+                    try { ssh.exec("rm -f /tmp/happ-mobile-probes.tsv "
+                            + "/tmp/happ-mobile-probes.lua /tmp/happ-mobile-probes.results "
+                            + "/tmp/happ-mobile-probes.results.tmp", 10); }
+                    catch (Exception ignored) { }
+                }
+            }
+            ranked.addAll(delays.keySet());
+            ranked.sort(Comparator.comparingInt(delays::get));
+        }
+        if (ranked.isEmpty()) throw new Exception("Router eklenen sunuculara ulaşamadı. Mevcut VPN korundu.");
+        for (VpnProfile profile : ranked) {
+            try { return new Candidate(profile, testCandidate(profile)); }
+            catch (Exception ignored) { /* Try the next reachable server. */ }
+        }
+        throw new Exception("Sunuculara erişildi ama VPN çıkışı doğrulanamadı. Mevcut VPN korundu.");
     }
 
     String install(List<VpnProfile> profiles, String selectedTag, long expiry) throws Exception {
@@ -135,6 +203,36 @@ final class RouterGateway {
     void automatic() throws Exception {
         try (RouterSsh ssh = new RouterSsh(context, identity)) {
             ssh.exec("/etc/happvpn/switch-node.sh enable-auto", 180);
+        }
+    }
+
+    void setMode(String mode) throws Exception {
+        if (!mode.equals("vpn") && !mode.equals("direct"))
+            throw new IllegalArgumentException("İnternet modu geçersiz.");
+        try (RouterSsh ssh = new RouterSsh(context, identity)) {
+            if (mode.equals("vpn")) {
+                long expiry = Long.parseLong(ssh.exec("cat /etc/happvpn/expires-at", 15));
+                if (expiry <= System.currentTimeMillis() / 1000)
+                    throw new Exception("Abonelik süresi dolmuş. Önce yeni sunucu ve bitiş günü kaydedin.");
+                ssh.exec("/etc/happvpn/node-helper.lua check 1080", 30);
+            }
+            ssh.exec("/etc/happvpn/mode.sh " + mode, 45);
+        }
+    }
+
+    void setDeviceBlocked(String mac, boolean blocked) throws Exception {
+        if (mac == null || !mac.matches("(?i)([0-9a-f]{2}:){5}[0-9a-f]{2}"))
+            throw new IllegalArgumentException("Cihaz MAC adresi geçersiz.");
+        try (RouterSsh ssh = new RouterSsh(context, identity)) {
+            ssh.write("/tmp/happ-mobile-block.sh", readAsset("mobile-block.sh"));
+            try {
+                ssh.exec("chmod 700 /tmp/happ-mobile-block.sh && /tmp/happ-mobile-block.sh "
+                        + mac.toLowerCase(java.util.Locale.ROOT) + " "
+                        + (blocked ? "block" : "unblock"), 60);
+            } finally {
+                try { ssh.exec("rm -f /tmp/happ-mobile-block.sh", 10); }
+                catch (Exception ignored) { }
+            }
         }
     }
 

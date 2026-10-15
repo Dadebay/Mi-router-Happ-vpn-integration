@@ -1,24 +1,30 @@
 # HappRouter Android
 
-Bu APK, telefon `HappVPN` Wi-Fi ağına bağlıyken `192.168.1.1` adresindeki Xiaomi Mi Router 4C'ye doğrudan SSH ile bağlanır. Mac'in açık kalması gerekmez. İlk sürüm VPN durumunu, kayıtlı sunucuları, iki HTTPS aboneliğinden sunucu getirmeyi, seçilen sunucuyu test edip router'a kurmayı ve otomatik/elle sunucu seçimini içerir.
+Android uygulaması, Xiaomi Mi Router 4C üzerindeki mevcut HappRouter kurulumunu yerel Wi-Fi üzerinden yönetir. Mac'in açık kalması gerekmez. Router modu ve VPN çıkış IP'si, CPU/RAM, Wi-Fi ve WAN trafiği, günlük cihaz kullanımı, bağlı cihazların IP adresleri, engelleme kuralları ve kayıtlı Shadowsocks sunucuları uygulamada görünür. Sunucu ve internet modu değiştirilebilir.
+
+Kullanıcı için kısa telefon kılavuzu: [ANDROID-KULLANIM.md](../Docs/ANDROID-KULLANIM.md).
 
 ## APK oluşturma
 
-Mac'te Android SDK ve mevcut router SSH host kaydı (`~/.happ-router/known_hosts`) gerekir:
+Android SDK ve router'ın önceden doğrulanmış SSH host anahtarı (`~/.happ-router/known_hosts`) gerekir:
 
 ```sh
 ./android/build-apk.sh
 ```
 
-Çıktı: `dist/HappRouter-Android.apk`. Betik APK'yı yerel ve kalıcı bir imza anahtarıyla imzalar. İmza dosyaları `~/.happ-router/` altında kalır; depoya girmez. Aynı telefondaki güncellemeler için bu imza anahtarını koruyun. Router host anahtarının açık kısmı APK'ya eklenir; telefon farklı bir SSH host kimliğine sessizce bağlanmaz.
+Çıktı `dist/HappRouter-Android.apk` dosyasıdır. Sürüm imzası `~/.happ-router/` altında kalır. Aynı telefona güncelleme kurabilmek için imza dosyasını koruyun. APK yalnız router'ın sabitlenmiş açık SSH host anahtarına bağlanır; router LAN IP adresi uygulamadan değiştirilebilir, host kimliği değiştirilemez.
 
-## Telefonu eşleştirme
+## İlk eşleştirme
 
-1. APK'yı telefona kurun ve uygulamayı açın. Uygulama telefonda ayrı bir SSH anahtar çifti oluşturur.
-2. **Açık anahtarı paylaş** ile yalnızca `ssh-rsa ... happrouter-android` satırını Mac'e aktarın ve `android.pub` adlı metin dosyasına kaydedin.
-3. Mac'te bu depodan `./Scripts/pair-android.sh android.pub` komutunu çalıştırın. Betik açık anahtarı router'ın Dropbear yetki dosyasına ekler; özel anahtar telefondan çıkmaz.
-4. Telefonu `HappVPN` Wi-Fi ağına bağlayın ve uygulamada **Yenile**'ye basın.
+1. Telefonu HappVPN Wi-Fi ağına bağlayın, uygulamayı açın, router'ın LAN IP adresini girin.
+2. Router'da SSH parola girişi açıksa **Telefonu eşleştir** alanına yönetici parolasını yazın. Uygulama kendi açık SSH anahtarını router'a ekler; parola saklanmaz.
+3. SSH parola girişi kapalıysa uygulamadaki açık anahtarı kopyalayıp telefonun tarayıcısında OpenWrt LuCI **System → Administration → SSH-Keys** bölümüne ekleyin. Bu işlem router'ın yönetici parolasını gerektirir. LuCI yoksa anahtarı mevcut SSH yöneticisine iletin; Mac'te `./Scripts/pair-android.sh android.pub` kullanılabilir.
+4. **Yenile** ile router durumunu açın.
 
-Eşleştirmeden sonra abonelik bağlantılarını girip **Sunucuları getir → Bağlantıyı test et → Test edilen sunucuyu kur** adımlarını kullanın. İkinci alan isteğe bağlıdır. Kurulum seçilen sunucuyu yeniden doğrular; başarısız olursa önceki router yapılandırmasını geri yükler. Abonelik adresleri Android Keystore ile şifrelenerek telefonda saklanır; APK ve router metadata dosyalarına yazılmaz.
+## Sunucu ekleme
 
-Yalnızca Shadowsocks `ss://`, Shadowsocks içeren HTTPS abonelikleri ve Happ'ten alınan Shadowsocks JSON profili desteklenir. Şifreli `happ://crypt5`, VLESS ve Hysteria bu router'daki hafif Shadowsocks istemcisiyle çalışmaz. VPN kesintisinde Wi-Fi üzerinden abonelik indirilemiyorsa mobil veriyle **Sunucuları getir** adımını tamamlayıp kurulumdan önce tekrar `HappVPN` Wi-Fi ağına bağlanın.
+En fazla iki HTTPS aboneliği veya bir `ss://` bağlantısı girin. **Sunucuları getir** tüm Shadowsocks profillerini tek listede gösterir. **En uygun sunucuyu bul ve test et** router üzerinden TCP gecikmesine göre sıralar, ardından gerçek VPN çıkışını doğrular. İsteyen kullanıcı tek sunucuyu elle seçip test edebilir. Bitiş tarihini seçip **Tüm sunucuları kur** ile profil listesini router'a yükleyin. Kurulum seçilen sunucuyu tekrar doğrular; başarısızlıkta önceki yapılandırmayı geri yükler. Daha sonra otomatik seçim en hızlı çalışan sunucuyu kullanır.
+
+Abonelik adresleri Android Keystore ile şifrelenerek yalnız telefonda saklanır. APK'ya veya router'ın metadata dosyalarına yazılmaz. `happ://crypt5`, VLESS ve Hysteria bu router'ın Shadowsocks istemcisiyle çalışmaz. Wi-Fi üzerinden abonelik indirilemiyorsa geçici olarak mobil veriyle profilleri getirip kurulumdan önce tekrar HappVPN Wi-Fi'ye bağlanın.
+
+Uygulama yalnız yerel router ağından çalışır; internet üzerinden uzaktan yönetim açmaz.
