@@ -120,6 +120,15 @@ public final class MainActivity extends Activity {
         subtitle.setPadding(0, dp(3), 0, dp(20));
         page.addView(subtitle);
 
+        LinearLayout guide = card(page);
+        guide.addView(text("İlk kurulum", 17, DARK, Typeface.BOLD));
+        TextView guideHint = text("Router'ın yanındaki kişi tüm adımları telefondan tamamlayabilir.",
+                13, MUTED, Typeface.NORMAL);
+        guideHint.setPadding(0, dp(5), 0, dp(9));
+        guide.addView(guideHint);
+        guide.addView(button("Adım adım rehberi aç", false,
+                () -> startActivity(new Intent(this, GuideActivity.class))));
+
         LinearLayout addressCard = card(page);
         addressCard.addView(text("Router adresi", 17, DARK, Typeface.BOLD));
         LinearLayout addressRow = row();
@@ -218,19 +227,6 @@ public final class MainActivity extends Activity {
             startActivity(Intent.createChooser(share, "Açık anahtarı paylaş"));
         }));
 
-        LinearLayout guide = card(page);
-        guide.addView(text("Telefondan kurulum", 17, DARK, Typeface.BOLD));
-        TextView guideSteps = text("1  Telefonu HappVPN Wi-Fi ağına bağla.\n"
-                + "2  Router IP'sini yaz ve Bağlan'a bas.\n"
-                + "3  İlk kez kullanıyorsan yönetici parolasıyla telefonu eşleştir.\n"
-                + "4  VPN aboneliğini gir, Sunucuları getir'e bas.\n"
-                + "5  En uygun sunucuyu test et, bitiş gününü seç ve tümünü kur.\n"
-                + "6  VPN modunu aç. Çıkış IP'si görünüyorsa bağlantı hazır.",
-                13, MUTED, Typeface.NORMAL);
-        guideSteps.setPadding(0, dp(8), 0, 0);
-        guideSteps.setLineSpacing(dp(4), 1);
-        guide.addView(guideSteps);
-
         LinearLayout profile = card(page);
         profile.addView(text("Abonelikleri değiştir", 17, DARK, Typeface.BOLD));
         TextView help = text("En fazla iki HTTPS bağlantısı ekle. Shadowsocks sunucuları tek listede görünür.",
@@ -316,9 +312,9 @@ public final class MainActivity extends Activity {
                 expiryInput.setText(Instant.ofEpochSecond(status.expiry)
                         .atZone(ZoneId.systemDefault()).toLocalDate().toString());
         }, error -> {
-            String reason = error.getCause() == null ? "" : error.getCause().getMessage();
-            connectionText.setText("Bağlanılamadı · " + (reason == null || reason.isEmpty()
-                    ? "HappVPN Wi-Fi ve router adresini kontrol et." : reason));
+            String reason = error.getMessage();
+            connectionText.setText(reason == null || reason.isEmpty()
+                    ? "Bağlanılamadı · HappVPN Wi-Fi ve router adresini kontrol et." : reason);
             modeRow.setVisibility(View.GONE);
             metricsCard.setVisibility(View.GONE);
             devicesCard.setVisibility(View.GONE);

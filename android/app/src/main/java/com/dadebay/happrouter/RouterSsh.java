@@ -44,8 +44,17 @@ final class RouterSsh implements AutoCloseable {
         try {
             session.connect(15000);
         } catch (Exception error) {
-            throw new Exception("Router bağlantısı kurulamadı. Wi-Fi, router IP'si, yönetici parolası veya eşleştirmeyi kontrol edin. "
-                    + error.getMessage(), error);
+            String detail = error.getMessage() == null ? "" : error.getMessage();
+            String message;
+            if (detail.contains("HostKey") || detail.contains("host key"))
+                message = "Bu IP'deki cihaz beklenen HappRouter değil. HappVPN Wi-Fi ağını ve router adresini kontrol et.";
+            else if (detail.contains("Auth fail") || detail.contains("USERAUTH"))
+                message = password == null
+                        ? "Telefon henüz eşleştirilmemiş. Yönetici parolasıyla eşleştir veya açık anahtarı router'a ekle."
+                        : "Yönetici parolası yanlış veya SSH parolalı giriş kapalı. Rehberdeki SSH-Keys yolunu kullan.";
+            else
+                message = "Router'a ulaşılamadı. HappVPN Wi-Fi ağını ve router adresini kontrol et.";
+            throw new Exception(message, error);
         }
     }
 

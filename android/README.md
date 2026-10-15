@@ -3,6 +3,7 @@
 Android uygulaması, Xiaomi Mi Router 4C üzerindeki mevcut HappRouter kurulumunu yerel Wi-Fi üzerinden yönetir. Mac'in açık kalması gerekmez. Router modu ve VPN çıkış IP'si, CPU/RAM, Wi-Fi ve WAN trafiği, günlük cihaz kullanımı, bağlı cihazların IP adresleri, engelleme kuralları ve kayıtlı Shadowsocks sunucuları uygulamada görünür. Sunucu ve internet modu değiştirilebilir.
 
 Kullanıcı için kısa telefon kılavuzu: [ANDROID-KULLANIM.md](../Docs/ANDROID-KULLANIM.md).
+Uygulamanın üstündeki **Adım adım rehberi aç** düğmesi aynı kurulum yolunu, ilk eşleştirme seçeneklerini ve hata çözümlerini çevrimdışı gösterir.
 
 ## APK oluşturma
 
