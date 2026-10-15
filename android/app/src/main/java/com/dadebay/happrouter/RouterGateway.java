@@ -96,7 +96,7 @@ final class RouterGateway {
                 ssh.exec("sleep 1", 5);
                 return ssh.exec("/etc/happvpn/node-helper.lua check 11084", 35);
             } catch (Exception error) {
-                throw new Exception("Sunucu router üzerinden internete çıkamadı. Mevcut bağlantı değiştirilmedi.", error);
+                throw new Exception(context.getString(R.string.server_no_internet), error);
             } finally {
                 try { ssh.exec("if [ -s /tmp/happ-mobile-probe.pid ]; then "
                         + "kill $(cat /tmp/happ-mobile-probe.pid) 2>/dev/null || true; fi; "
@@ -108,7 +108,7 @@ final class RouterGateway {
     }
 
     Candidate bestCandidate(List<VpnProfile> profiles) throws Exception {
-        if (profiles.isEmpty()) throw new IllegalArgumentException("Sunucu listesi boş.");
+        if (profiles.isEmpty()) throw new IllegalArgumentException(context.getString(R.string.servers_empty));
         List<VpnProfile> ranked = new ArrayList<>();
         if (profiles.size() == 1) ranked.add(profiles.get(0));
         else {
@@ -146,22 +146,22 @@ final class RouterGateway {
             ranked.addAll(delays.keySet());
             ranked.sort(Comparator.comparingInt(delays::get));
         }
-        if (ranked.isEmpty()) throw new Exception("Router eklenen sunuculara ulaşamadı. Mevcut VPN korundu.");
+        if (ranked.isEmpty()) throw new Exception(context.getString(R.string.servers_unreachable));
         for (VpnProfile profile : ranked) {
             try { return new Candidate(profile, testCandidate(profile)); }
             catch (Exception ignored) { /* Try the next reachable server. */ }
         }
-        throw new Exception("Sunuculara erişildi ama VPN çıkışı doğrulanamadı. Mevcut VPN korundu.");
+        throw new Exception(context.getString(R.string.vpn_exit_unverified));
     }
 
     String install(List<VpnProfile> profiles, String selectedTag, long expiry) throws Exception {
         if (profiles.isEmpty() || profiles.size() > 200 || !selectedTag.matches("ss-[0-9]{2,3}"))
-            throw new IllegalArgumentException("Sunucu seçimi geçersiz.");
+            throw new IllegalArgumentException(context.getString(R.string.selection_invalid));
         if (expiry <= System.currentTimeMillis() / 1000)
-            throw new IllegalArgumentException("Gelecekteki abonelik bitiş tarihini seçin.");
+            throw new IllegalArgumentException(context.getString(R.string.expiry_future));
         boolean found = false;
         for (VpnProfile node : profiles) if (node.tag.equals(selectedTag)) found = true;
-        if (!found) throw new IllegalArgumentException("Seçilen sunucu bulunamadı.");
+        if (!found) throw new IllegalArgumentException(context.getString(R.string.selected_missing));
         try (RouterSsh ssh = new RouterSsh(context, identity)) {
             ssh.exec("set -e; test -x /etc/happvpn/node-helper.lua; "
                     + "test -x /etc/happvpn/mode.sh; command -v ss-local >/dev/null; "
@@ -185,7 +185,7 @@ final class RouterGateway {
             try {
                 return ssh.exec("/tmp/happ-mobile-apply.sh", 120);
             } catch (Exception error) {
-                throw new Exception("Kurulum doğrulanamadı. Router durumunu yenileyip aktif sunucuyu kontrol edin.", error);
+                throw new Exception(context.getString(R.string.install_unverified), error);
             } finally {
                 try { ssh.exec("rm -f /tmp/happ-mobile-apply.sh", 15); }
                 catch (Exception ignored) { }
@@ -194,7 +194,7 @@ final class RouterGateway {
     }
 
     void select(String tag) throws Exception {
-        if (!tag.matches("ss-[0-9]{2,3}")) throw new IllegalArgumentException("Sunucu seçimi geçersiz.");
+        if (!tag.matches("ss-[0-9]{2,3}")) throw new IllegalArgumentException(context.getString(R.string.selection_invalid));
         try (RouterSsh ssh = new RouterSsh(context, identity)) {
             ssh.exec("/etc/happvpn/switch-node.sh manual " + tag, 180);
         }
@@ -208,12 +208,12 @@ final class RouterGateway {
 
     void setMode(String mode) throws Exception {
         if (!mode.equals("vpn") && !mode.equals("direct"))
-            throw new IllegalArgumentException("İnternet modu geçersiz.");
+            throw new IllegalArgumentException(context.getString(R.string.mode_invalid));
         try (RouterSsh ssh = new RouterSsh(context, identity)) {
             if (mode.equals("vpn")) {
                 long expiry = Long.parseLong(ssh.exec("cat /etc/happvpn/expires-at", 15));
                 if (expiry <= System.currentTimeMillis() / 1000)
-                    throw new Exception("Abonelik süresi dolmuş. Önce yeni sunucu ve bitiş günü kaydedin.");
+                    throw new Exception(context.getString(R.string.subscription_expired));
                 ssh.exec("/etc/happvpn/node-helper.lua check 1080", 30);
             }
             ssh.exec("/etc/happvpn/mode.sh " + mode, 45);
@@ -222,7 +222,7 @@ final class RouterGateway {
 
     void setDeviceBlocked(String mac, boolean blocked) throws Exception {
         if (mac == null || !mac.matches("(?i)([0-9a-f]{2}:){5}[0-9a-f]{2}"))
-            throw new IllegalArgumentException("Cihaz MAC adresi geçersiz.");
+            throw new IllegalArgumentException(context.getString(R.string.mac_invalid));
         try (RouterSsh ssh = new RouterSsh(context, identity)) {
             ssh.write("/tmp/happ-mobile-block.sh", readAsset("mobile-block.sh"));
             try {

@@ -4,6 +4,7 @@ Android uygulaması, Xiaomi Mi Router 4C üzerindeki mevcut HappRouter kurulumun
 
 Kullanıcı için kısa telefon kılavuzu: [ANDROID-KULLANIM.md](../Docs/ANDROID-KULLANIM.md).
 Uygulamanın üstündeki **Adım adım rehberi aç** düğmesi aynı kurulum yolunu, ilk eşleştirme seçeneklerini ve hata çözümlerini çevrimdışı gösterir.
+Ana ekrandaki **TM / RU / EN** seçimi uygulamayı ve rehberi Türkmence, Rusça veya İngilizce gösterir. Seçilen dil cihazda saklanır. İlk açılış dili Türkmencedir.
 
 ## APK oluşturma
 

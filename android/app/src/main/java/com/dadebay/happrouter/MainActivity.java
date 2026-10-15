@@ -35,7 +35,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
-public final class MainActivity extends Activity {
+public final class MainActivity extends AppLanguage.Screen {
     private static final int BLUE = Color.rgb(34, 103, 234);
     private static final int DARK = Color.rgb(26, 35, 52);
     private static final int MUTED = Color.rgb(102, 115, 137);
@@ -115,22 +115,38 @@ public final class MainActivity extends Activity {
         scroll.addView(page);
         setContentView(scroll);
 
-        page.addView(text("HappRouter", 29, DARK, Typeface.BOLD));
-        TextView subtitle = text("Mi Router 4C · Telefon kontrol paneli", 14, MUTED, Typeface.NORMAL);
+        page.addView(text(getString(R.string.app_name), 29, DARK, Typeface.BOLD));
+        TextView subtitle = text(getString(R.string.subtitle), 14, MUTED, Typeface.NORMAL);
         subtitle.setPadding(0, dp(3), 0, dp(20));
         page.addView(subtitle);
 
+        LinearLayout languages = row();
+        languages.setPadding(0, 0, 0, dp(16));
+        page.addView(languages);
+        languages.addView(text(getString(R.string.language), 13, MUTED, Typeface.BOLD),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        for (String code : new String[] {"tk", "ru", "en"}) {
+            String label = code.equals("tk") ? "TM" : code.toUpperCase(java.util.Locale.ROOT);
+            Button language = button(label, code.equals(AppLanguage.current(this)), () -> {
+                if (!code.equals(AppLanguage.current(this))) {
+                    AppLanguage.select(this, code);
+                    recreate();
+                }
+            });
+            languages.addView(language);
+        }
+
         LinearLayout guide = card(page);
-        guide.addView(text("İlk kurulum", 17, DARK, Typeface.BOLD));
-        TextView guideHint = text("Router'ın yanındaki kişi tüm adımları telefondan tamamlayabilir.",
+        guide.addView(text(getString(R.string.first_setup), 17, DARK, Typeface.BOLD));
+        TextView guideHint = text(getString(R.string.first_setup_hint),
                 13, MUTED, Typeface.NORMAL);
         guideHint.setPadding(0, dp(5), 0, dp(9));
         guide.addView(guideHint);
-        guide.addView(button("Adım adım rehberi aç", false,
+        guide.addView(button(getString(R.string.open_guide), false,
                 () -> startActivity(new Intent(this, GuideActivity.class))));
 
         LinearLayout addressCard = card(page);
-        addressCard.addView(text("Router adresi", 17, DARK, Typeface.BOLD));
+        addressCard.addView(text(getString(R.string.router_address), 17, DARK, Typeface.BOLD));
         LinearLayout addressRow = row();
         addressRow.setPadding(0, dp(9), 0, 0);
         addressCard.addView(addressRow);
@@ -142,106 +158,104 @@ public final class MainActivity extends Activity {
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
         addressSpace.rightMargin = dp(8);
         addressRow.addView(routerIpInput, addressSpace);
-        addressRow.addView(button("Bağlan", false, () -> {
+        addressRow.addView(button(getString(R.string.connect), false, () -> {
             try {
                 RouterAddress.save(this, routerIpInput.getText().toString().trim());
                 routerStatus = null;
                 refreshStatus();
-            } catch (Exception error) { showMessage(error.getMessage(), ERROR); }
+            } catch (Exception error) { showMessage(UiError.message(this, error), ERROR); }
         }));
 
         LinearLayout status = card(page);
         LinearLayout statusHeader = row();
         status.addView(statusHeader);
-        TextView statusTitle = text("Router bağlantısı", 17, DARK, Typeface.BOLD);
+        TextView statusTitle = text(getString(R.string.router_connection), 17, DARK, Typeface.BOLD);
         statusHeader.addView(statusTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        refreshButton = button("Yenile", false, this::refreshStatus);
+        refreshButton = button(getString(R.string.refresh), false, this::refreshStatus);
         statusHeader.addView(refreshButton);
-        connectionText = text("Kontrol ediliyor…", 14, MUTED, Typeface.NORMAL);
+        connectionText = text(getString(R.string.checking), 14, MUTED, Typeface.NORMAL);
         connectionText.setPadding(0, dp(12), 0, 0);
         status.addView(connectionText);
         modeRow = row();
         modeRow.setPadding(0, dp(12), 0, 0);
         status.addView(modeRow);
-        modeRow.addView(button("VPN modu", false, () -> changeMode("vpn")));
-        modeRow.addView(button("Normal internet", false, () -> changeMode("direct")));
+        modeRow.addView(button(getString(R.string.vpn_mode), false, () -> changeMode("vpn")));
+        modeRow.addView(button(getString(R.string.normal_internet), false, () -> changeMode("direct")));
         modeRow.setVisibility(View.GONE);
         savedNodes = vertical();
         savedNodes.setPadding(0, dp(10), 0, 0);
         status.addView(savedNodes);
 
         metricsCard = card(page);
-        metricsCard.addView(text("Router verileri", 17, DARK, Typeface.BOLD));
+        metricsCard.addView(text(getString(R.string.router_data), 17, DARK, Typeface.BOLD));
         metricsContent = vertical();
         metricsContent.setPadding(0, dp(8), 0, 0);
         metricsCard.addView(metricsContent);
         metricsCard.setVisibility(View.GONE);
 
         devicesCard = card(page);
-        devicesCard.addView(text("Bağlı cihazlar", 17, DARK, Typeface.BOLD));
+        devicesCard.addView(text(getString(R.string.connected_devices), 17, DARK, Typeface.BOLD));
         devicesContent = vertical();
         devicesContent.setPadding(0, dp(8), 0, 0);
         devicesCard.addView(devicesContent);
         devicesCard.setVisibility(View.GONE);
 
         pairingCard = card(page);
-        pairingCard.addView(text("Telefonu eşleştir", 17, DARK, Typeface.BOLD));
-        TextView pairingInfo = text("HappVPN Wi-Fi ağına bağlan. Router yönetici parolan varsa "
-                + "buradan eşleştir. Parola telefonda saklanmaz. Parolayla SSH kapalıysa "
-                + "açık anahtarı router'ın yönetim sayfasındaki SSH anahtarlarına ekle.",
+        pairingCard.addView(text(getString(R.string.pair_phone), 17, DARK, Typeface.BOLD));
+        TextView pairingInfo = text(getString(R.string.pairing_info),
                 13, MUTED, Typeface.NORMAL);
         pairingInfo.setPadding(0, dp(8), 0, dp(10));
         pairingCard.addView(pairingInfo);
-        pairingPassword = input("Router yönetici parolası");
+        pairingPassword = input(getString(R.string.admin_password));
         pairingPassword.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         pairingCard.addView(pairingPassword);
-        Button pairButton = button("Telefonu eşleştir", true, this::pairPhone);
+        Button pairButton = button(getString(R.string.pair_phone), true, this::pairPhone);
         LinearLayout.LayoutParams pairSpace = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         pairSpace.topMargin = dp(9);
         pairingCard.addView(pairButton, pairSpace);
-        pairingKey = text("Anahtar hazırlanıyor…", 11, DARK, Typeface.NORMAL);
+        pairingKey = text(getString(R.string.key_preparing), 11, DARK, Typeface.NORMAL);
         pairingKey.setTextIsSelectable(true);
         pairingKey.setPadding(dp(10), dp(10), dp(10), dp(10));
         pairingKey.setBackground(rounded(BG, 10, BORDER));
         pairingKey.setVisibility(View.GONE);
-        revealKeyButton = button("Açık anahtarı göster", false, () -> {
+        revealKeyButton = button(getString(R.string.show_key), false, () -> {
             boolean show = pairingKey.getVisibility() != View.VISIBLE;
             pairingKey.setVisibility(show ? View.VISIBLE : View.GONE);
-            revealKeyButton.setText(show ? "Açık anahtarı gizle" : "Açık anahtarı göster");
+            revealKeyButton.setText(show ? R.string.hide_key : R.string.show_key);
         });
         pairingCard.addView(revealKeyButton);
         pairingCard.addView(pairingKey);
         LinearLayout pairingActions = row();
         pairingActions.setPadding(0, dp(10), 0, 0);
         pairingCard.addView(pairingActions);
-        pairingActions.addView(button("Kopyala", false, () -> {
+        pairingActions.addView(button(getString(R.string.copy), false, () -> {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(ClipData.newPlainText("HappRouter public key", pairingKey.getText()));
-            showMessage("Açık anahtar kopyalandı.", SUCCESS);
+            clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.key_clip_label), pairingKey.getText()));
+            showMessage(getString(R.string.key_copied), SUCCESS);
         }));
-        pairingActions.addView(button("Paylaş", false, () -> {
+        pairingActions.addView(button(getString(R.string.share), false, () -> {
             Intent share = new Intent(Intent.ACTION_SEND);
             share.setType("text/plain");
             share.putExtra(Intent.EXTRA_TEXT, pairingKey.getText().toString());
-            startActivity(Intent.createChooser(share, "Açık anahtarı paylaş"));
+            startActivity(Intent.createChooser(share, getString(R.string.share_key)));
         }));
 
         LinearLayout profile = card(page);
-        profile.addView(text("Abonelikleri değiştir", 17, DARK, Typeface.BOLD));
-        TextView help = text("En fazla iki HTTPS bağlantısı ekle. Shadowsocks sunucuları tek listede görünür.",
+        profile.addView(text(getString(R.string.change_subscriptions), 17, DARK, Typeface.BOLD));
+        TextView help = text(getString(R.string.subscriptions_hint),
                 13, MUTED, Typeface.NORMAL);
         help.setPadding(0, dp(6), 0, dp(14));
         profile.addView(help);
-        profile.addView(text("1. abonelik veya ss://", 12, MUTED, Typeface.BOLD));
-        firstInput = input("HTTPS abonelik veya Shadowsocks bağlantısı");
+        profile.addView(text(getString(R.string.first_subscription), 12, MUTED, Typeface.BOLD));
+        firstInput = input(getString(R.string.first_subscription_hint));
         profile.addView(firstInput);
-        TextView secondLabel = text("2. abonelik · isteğe bağlı", 12, MUTED, Typeface.BOLD);
+        TextView secondLabel = text(getString(R.string.second_subscription), 12, MUTED, Typeface.BOLD);
         secondLabel.setPadding(0, dp(10), 0, 0);
         profile.addView(secondLabel);
-        secondInput = input("İkinci HTTPS abonelik adresi");
+        secondInput = input(getString(R.string.second_subscription_hint));
         profile.addView(secondInput);
-        Button visibility = button("Adresleri göster / gizle", false, () -> {
+        Button visibility = button(getString(R.string.toggle_addresses), false, () -> {
             boolean show = firstInput.getTransformationMethod() != null;
             firstInput.setTransformationMethod(show ? null : PasswordTransformationMethod.getInstance());
             secondInput.setTransformationMethod(show ? null : PasswordTransformationMethod.getInstance());
@@ -252,33 +266,33 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         visibilitySpace.topMargin = dp(8);
         profile.addView(visibility, visibilitySpace);
-        fetchButton = button("Sunucuları getir", true, this::fetchProfiles);
+        fetchButton = button(getString(R.string.fetch_servers), true, this::fetchProfiles);
         LinearLayout.LayoutParams fetchSpace = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         fetchSpace.topMargin = dp(14);
         profile.addView(fetchButton, fetchSpace);
 
         previewSection = card(page);
-        previewSection.addView(text("Yeni sunucular", 17, DARK, Typeface.BOLD));
+        previewSection.addView(text(getString(R.string.new_servers), 17, DARK, Typeface.BOLD));
         previewSummary = text("", 13, MUTED, Typeface.NORMAL);
         previewSummary.setPadding(0, dp(6), 0, dp(10));
         previewSection.addView(previewSummary);
         previewChoices = new RadioGroup(this);
         previewSection.addView(previewChoices);
-        testedText = text("Uygulama en uygun sunucuyu bulur. İstersen listeden elle seçebilirsin.",
+        testedText = text(getString(R.string.auto_test_hint),
                 13, MUTED, Typeface.NORMAL);
         testedText.setPadding(0, dp(10), 0, dp(10));
         previewSection.addView(testedText);
-        testButton = button("En uygun sunucuyu bul ve test et", false, this::testSelected);
+        testButton = button(getString(R.string.auto_test_button), false, this::testSelected);
         previewSection.addView(testButton);
-        TextView expiryLabel = text("Abonelik bitiş günü", 12, MUTED, Typeface.BOLD);
+        TextView expiryLabel = text(getString(R.string.expiry_day), 12, MUTED, Typeface.BOLD);
         expiryLabel.setPadding(0, dp(18), 0, dp(4));
         previewSection.addView(expiryLabel);
-        expiryInput = input("Bitiş günü");
+        expiryInput = input(getString(R.string.expiry_hint));
         expiryInput.setFocusable(false);
         expiryInput.setOnClickListener(view -> chooseDate());
         previewSection.addView(expiryInput);
-        installButton = button("Tüm sunucuları kur", true, this::installSelected);
+        installButton = button(getString(R.string.install_all), true, this::installSelected);
         LinearLayout.LayoutParams installSpace = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         installSpace.topMargin = dp(12);
@@ -301,8 +315,10 @@ public final class MainActivity extends Activity {
         background(() -> gateway.status(), status -> {
             routerStatus = status;
             pairingCard.setVisibility(View.GONE);
-            String mode = "vpn".equals(status.mode) ? "VPN açık" : "Normal internet";
-            String ip = status.exitIp == null ? "Çıkış IP doğrulanamadı" : "Çıkış IP: " + status.exitIp;
+            String mode = "vpn".equals(status.mode)
+                    ? getString(R.string.vpn_on) : getString(R.string.normal_internet);
+            String ip = status.exitIp == null ? getString(R.string.exit_unverified)
+                    : getString(R.string.exit_ip_fmt, status.exitIp);
             connectionText.setText(mode + " · " + ip);
             modeRow.setVisibility(View.VISIBLE);
             renderMetrics();
@@ -312,9 +328,9 @@ public final class MainActivity extends Activity {
                 expiryInput.setText(Instant.ofEpochSecond(status.expiry)
                         .atZone(ZoneId.systemDefault()).toLocalDate().toString());
         }, error -> {
-            String reason = error.getMessage();
+            String reason = UiError.message(this, error);
             connectionText.setText(reason == null || reason.isEmpty()
-                    ? "Bağlanılamadı · HappVPN Wi-Fi ve router adresini kontrol et." : reason);
+                    ? getString(R.string.connection_failed) : reason);
             modeRow.setVisibility(View.GONE);
             metricsCard.setVisibility(View.GONE);
             devicesCard.setVisibility(View.GONE);
@@ -325,7 +341,7 @@ public final class MainActivity extends Activity {
     private void renderSavedNodes() {
         savedNodes.removeAllViews();
         if (routerStatus == null || routerStatus.nodes.isEmpty()) return;
-        TextView label = text("Kayıtlı sunucular", 13, MUTED, Typeface.BOLD);
+        TextView label = text(getString(R.string.saved_servers), 13, MUTED, Typeface.BOLD);
         label.setPadding(0, dp(8), 0, dp(5));
         savedNodes.addView(label);
         for (RouterGateway.SavedNode node : routerStatus.nodes) {
@@ -333,15 +349,15 @@ public final class MainActivity extends Activity {
             line.setPadding(0, dp(7), 0, dp(7));
             boolean active = node.tag.equals(routerStatus.active);
             String delay = node.delay != null ? " · " + node.delay + " ms"
-                    : Boolean.FALSE.equals(node.alive) ? " · Ulaşılamıyor" : "";
-            String name = node.name + delay + (active ? " · Aktif" : "");
+                    : Boolean.FALSE.equals(node.alive) ? " · " + getString(R.string.unreachable) : "";
+            String name = node.name + delay + (active ? " · " + getString(R.string.active) : "");
             line.addView(text(name, 13, active ? BLUE : DARK, active ? Typeface.BOLD : Typeface.NORMAL),
                     new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-            if (!active) line.addView(button("Seç", false, () -> changeNode(node.tag)));
+            if (!active) line.addView(button(getString(R.string.select), false, () -> changeNode(node.tag)));
             savedNodes.addView(line);
         }
-        automaticButton = button("Otomatik seçim: "
-                + ("auto".equals(routerStatus.selection) ? "Açık" : "Kapalı"),
+        automaticButton = button(getString(R.string.auto_selection_fmt,
+                getString("auto".equals(routerStatus.selection) ? R.string.on : R.string.off)),
                 false, this::enableAutomatic);
         automaticButton.setEnabled(!"auto".equals(routerStatus.selection) && !busy);
         savedNodes.addView(automaticButton);
@@ -350,16 +366,17 @@ public final class MainActivity extends Activity {
     private void renderMetrics() {
         metricsContent.removeAllViews();
         RouterMetrics m = routerStatus.metrics;
-        addMetric("VPN servisi", routerStatus.vpnRunning ? "Çalışıyor" : "Başlıyor / kapalı");
+        addMetric(getString(R.string.vpn_service), routerStatus.vpnRunning
+                ? getString(R.string.running) : getString(R.string.starting_or_off));
         addMetric("CPU", m.cpuPercent < 0 ? "—" : m.cpuPercent + "%");
         addMetric("RAM", m.memoryTotal < 0 ? "—" : formatBytes(m.memoryUsed)
                 + " / " + formatBytes(m.memoryTotal));
-        addMetric("Çalışma süresi", m.uptimeSeconds < 0 ? "—"
-                : m.uptimeSeconds / 3600 + " saat");
-        addMetric("Wi-Fi trafiği", formatBytes(m.wifiTx));
-        addMetric("WAN trafiği", formatBytes(m.wanRx));
-        addMetric("Bugün indirilen", formatBytes(m.wifiDownloadToday));
-        if (routerStatus.expiry > 0) addMetric("Abonelik bitişi",
+        addMetric(getString(R.string.uptime), m.uptimeSeconds < 0 ? "—"
+                : getString(R.string.hours_fmt, m.uptimeSeconds / 3600));
+        addMetric(getString(R.string.wifi_traffic), formatBytes(m.wifiTx));
+        addMetric(getString(R.string.wan_traffic), formatBytes(m.wanRx));
+        addMetric(getString(R.string.downloaded_today), formatBytes(m.wifiDownloadToday));
+        if (routerStatus.expiry > 0) addMetric(getString(R.string.subscription_expiry),
                 Instant.ofEpochSecond(routerStatus.expiry)
                         .atZone(ZoneId.systemDefault()).toLocalDate().toString());
         metricsCard.setVisibility(View.VISIBLE);
@@ -377,7 +394,7 @@ public final class MainActivity extends Activity {
     private void renderDevices() {
         devicesContent.removeAllViews();
         List<RouterMetrics.Device> devices = routerStatus.metrics.devices;
-        if (devices.isEmpty()) devicesContent.addView(text("Bağlı cihaz bulunmadı.", 13, MUTED,
+        if (devices.isEmpty()) devicesContent.addView(text(getString(R.string.no_devices), 13, MUTED,
                 Typeface.NORMAL));
         for (RouterMetrics.Device device : devices) {
             LinearLayout item = vertical();
@@ -386,12 +403,13 @@ public final class MainActivity extends Activity {
             item.addView(heading);
             heading.addView(text(device.name, 14, DARK, Typeface.BOLD),
                     new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-            heading.addView(button(device.blocked ? "Engeli kaldır" : "Engelle", false,
+            heading.addView(button(getString(device.blocked ? R.string.unblock : R.string.block), false,
                     () -> confirmDeviceBlock(device)));
-            String details = device.connection + " · " + (device.ip.isEmpty() ? "IP bilinmiyor" : device.ip)
-                    + "\nBugün ↓ " + formatBytes(device.downloadToday)
+            String connection = "Kablo".equals(device.connection) ? getString(R.string.wired) : device.connection;
+            String details = connection + " · " + (device.ip.isEmpty() ? getString(R.string.ip_unknown) : device.ip)
+                    + "\n" + getString(R.string.today_usage) + " ↓ " + formatBytes(device.downloadToday)
                     + "  ↑ " + formatBytes(device.uploadToday)
-                    + "\nToplam ↓ " + formatBytes(device.downloaded)
+                    + "\n" + getString(R.string.total_usage) + " ↓ " + formatBytes(device.downloaded)
                     + "  ↑ " + formatBytes(device.uploaded);
             item.addView(text(details, 12, MUTED, Typeface.NORMAL));
             devicesContent.addView(item);
@@ -400,14 +418,14 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmDeviceBlock(RouterMetrics.Device device) {
-        String verb = device.blocked ? "engeli kaldırılsın mı?" : "internet erişimi engellensin mi?";
         new AlertDialog.Builder(this).setTitle(device.name)
-                .setMessage(device.ip + " adresli cihazın " + verb)
-                .setNegativeButton("Vazgeç", null)
-                .setPositiveButton(device.blocked ? "Engeli kaldır" : "Engelle", (dialog, which) ->
+                .setMessage(getString(device.blocked ? R.string.unblock_confirm_fmt
+                        : R.string.block_confirm_fmt, device.name, device.ip))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(device.blocked ? R.string.unblock : R.string.block, (dialog, which) ->
                         background(() -> { gateway.setDeviceBlocked(device.mac, !device.blocked); return true; },
                                 result -> {
-                                    showMessage("Cihaz kuralı güncellendi.", SUCCESS);
+                                    showMessage(getString(R.string.device_rule_updated), SUCCESS);
                                     refreshStatus();
                                 }))
                 .show();
@@ -418,25 +436,26 @@ public final class MainActivity extends Activity {
         pairingPassword.setText("");
         background(() -> { RouterSsh.pairWithPassword(this, identity, password); return true; },
                 result -> {
-                    showMessage("Telefon eşleştirildi.", SUCCESS);
+                    showMessage(getString(R.string.phone_paired), SUCCESS);
                     refreshStatus();
-                }, error -> connectionText.setText("Eşleştirme başarısız. Router parolasını ve Wi-Fi'yi kontrol et."));
+                }, error -> connectionText.setText(getString(R.string.pairing_failed)));
     }
 
     private void changeMode(String mode) {
         if (routerStatus == null || mode.equals(routerStatus.mode)) return;
         background(() -> { gateway.setMode(mode); return true; }, result -> {
-            showMessage(mode.equals("vpn") ? "VPN modu açıldı." : "Normal internet açıldı.", SUCCESS);
+            showMessage(getString(mode.equals("vpn") ? R.string.vpn_mode_enabled
+                    : R.string.normal_mode_enabled), SUCCESS);
             refreshStatus();
         });
     }
 
-    private static String formatBytes(long bytes) {
+    private String formatBytes(long bytes) {
         if (bytes < 0) return "—";
         if (bytes >= 1_000_000_000) return String.format(java.util.Locale.US, "%.2f GB", bytes / 1e9);
         if (bytes >= 1_000_000) return String.format(java.util.Locale.US, "%.1f MB", bytes / 1e6);
         if (bytes >= 1_000) return String.format(java.util.Locale.US, "%.0f KB", bytes / 1e3);
-        return bytes + " B";
+        return bytes + " " + getString(R.string.byte_b);
     }
 
     private void fetchProfiles() {
@@ -451,17 +470,17 @@ public final class MainActivity extends Activity {
                 secrets.write("first", first.trim());
                 secrets.write("second", second.trim());
             } catch (Exception error) {
-                showMessage("Abonelik adresleri güvenli depoya kaydedilemedi.", ERROR);
+                showMessage(getString(R.string.save_subscriptions_failed), ERROR);
             }
             renderPreview();
-            showMessage(nodes.size() + " sunucu getirildi. En uygunu test edebilirsin.", BLUE);
+            showMessage(getString(R.string.servers_fetched_fmt, nodes.size()), BLUE);
         });
     }
 
     private void renderPreview() {
         previewSection.setVisibility(previewNodes.isEmpty() ? View.GONE : View.VISIBLE);
         previewChoices.removeAllViews();
-        previewSummary.setText(previewNodes.size() + " Shadowsocks sunucusu");
+        previewSummary.setText(getString(R.string.servers_count_fmt, previewNodes.size()));
         for (VpnProfile node : previewNodes) {
             RadioButton radio = new RadioButton(this);
             radio.setId(View.generateViewId());
@@ -475,18 +494,18 @@ public final class MainActivity extends Activity {
                 selectedTag = node.tag;
                 testedTag = "";
                 testedIp = "";
-                testedText.setText("Elle seçilen sunucuyu test et. Mevcut bağlantı değişmez.");
-                testButton.setText("Seçilen sunucuyu test et");
+                testedText.setText(R.string.manual_test_hint);
+                testButton.setText(R.string.manual_test_button);
                 updateActions();
             });
             previewChoices.addView(radio);
             if (node.tag.equals(selectedTag)) previewChoices.check(radio.getId());
         }
         testedText.setText(testedTag.isEmpty()
-                ? "Uygulama en uygun sunucuyu bulur. İstersen listeden elle seçebilirsin."
-                : "Bağlantı başarılı · Çıkış IP: " + testedIp);
-        testButton.setText(selectedTag.isEmpty() ? "En uygun sunucuyu bul ve test et"
-                : "Seçilen sunucuyu test et");
+                ? getString(R.string.auto_test_hint)
+                : getString(R.string.test_success_fmt, testedIp));
+        testButton.setText(selectedTag.isEmpty() ? R.string.auto_test_button
+                : R.string.manual_test_button);
         testedText.setTextColor(testedTag.isEmpty() ? MUTED : SUCCESS);
         updateActions();
     }
@@ -500,7 +519,7 @@ public final class MainActivity extends Activity {
             testedTag = candidate.profile.tag;
             testedIp = candidate.exitIp;
             renderPreview();
-            showMessage("Çalışan sunucu bulundu: " + candidate.profile.name, SUCCESS);
+            showMessage(getString(R.string.server_found_fmt, candidate.profile.name), SUCCESS);
         });
     }
 
@@ -511,13 +530,13 @@ public final class MainActivity extends Activity {
             LocalDate day = LocalDate.parse(expiryInput.getText().toString(), DateTimeFormatter.ISO_LOCAL_DATE);
             expiry = day.atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toEpochSecond();
         } catch (Exception error) {
-            showMessage("Geçerli bir bitiş günü seç.", ERROR);
+            showMessage(getString(R.string.invalid_expiry), ERROR);
             return;
         }
         List<VpnProfile> snapshot = new ArrayList<>(previewNodes);
         String tag = selectedTag;
         background(() -> gateway.install(snapshot, tag, expiry), ip -> {
-            showMessage("Kurulum tamamlandı. VPN çıkış IP: " + ip, SUCCESS);
+            showMessage(getString(R.string.install_done_fmt, ip), SUCCESS);
             previewNodes.clear();
             selectedTag = "";
             testedTag = "";
@@ -532,15 +551,15 @@ public final class MainActivity extends Activity {
     }
 
     private void changeNode(String tag) {
-        background(() -> { gateway.select(tag); return "Sunucu değiştirildi."; }, result -> {
-            showMessage(result, SUCCESS);
+        background(() -> { gateway.select(tag); return true; }, result -> {
+            showMessage(getString(R.string.server_changed), SUCCESS);
             refreshStatus();
         });
     }
 
     private void enableAutomatic() {
-        background(() -> { gateway.automatic(); return "Otomatik seçim açıldı."; }, result -> {
-            showMessage(result, SUCCESS);
+        background(() -> { gateway.automatic(); return true; }, result -> {
+            showMessage(getString(R.string.automatic_enabled), SUCCESS);
             refreshStatus();
         });
     }
@@ -571,8 +590,7 @@ public final class MainActivity extends Activity {
             } catch (Exception error) {
                 runOnUiThread(() -> {
                     setBusy(false);
-                    String message = error.getMessage();
-                    showMessage(message == null ? "İşlem tamamlanamadı." : message, ERROR);
+                    showMessage(UiError.message(this, error), ERROR);
                     if (failure != null) failure.accept(error);
                     if (routerStatus == null) pairingCard.setVisibility(View.VISIBLE);
                 });

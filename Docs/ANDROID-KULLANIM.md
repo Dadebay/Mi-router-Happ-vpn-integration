@@ -4,7 +4,7 @@ Bu kılavuzu router'ın yanındaki kişiye gönderin. Bilgisayar gerekmez; telef
 
 ## 1. Uygulamayı kur
 
-[HappRouter Android APK dosyasını indir](https://github.com/Dadebay/Mi-router-Happ-vpn-integration/raw/refs/heads/main/releases/HappRouter-Android-v0.2.1.apk). Telefonda dosyayı açın. Android isterse dosyayı açtığınız uygulamaya **Bilinmeyen uygulamaları yükleme** izni verin. Uygulama adı **HappRouter**. Açılınca üstteki **Adım adım rehberi aç** düğmesiyle bu anlatımı uygulamanın içinde de görebilirsiniz.
+[HappRouter Android APK dosyasını indir](https://github.com/Dadebay/Mi-router-Happ-vpn-integration/raw/refs/heads/main/releases/HappRouter-Android-v0.3.0.apk). Telefonda dosyayı açın. Android isterse dosyayı açtığınız uygulamaya **Bilinmeyen uygulamaları yükleme** izni verin. Uygulama adı **HappRouter**. Ana ekranın üstündeki **TM / RU / EN** düğmeleriyle Türkmence, Rusça veya İngilizce seçebilirsiniz; seçim telefonda saklanır. Üstteki **Adım adım rehberi aç** düğmesi bu anlatımı seçilen dilde uygulamanın içinde gösterir.
 
 ## 2. Router'a bağlan
 

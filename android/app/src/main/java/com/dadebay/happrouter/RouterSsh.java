@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 final class RouterSsh implements AutoCloseable {
+    private final Context context;
     private final Session session;
 
     RouterSsh(Context context, DeviceIdentity identity) throws Exception {
@@ -22,6 +23,7 @@ final class RouterSsh implements AutoCloseable {
     }
 
     private RouterSsh(Context context, DeviceIdentity identity, char[] password) throws Exception {
+        this.context = context;
         JSch jsch = new JSch();
         try (InputStream knownHosts = context.getAssets().open("router_known_hosts")) {
             String pinned = new String(knownHosts.readAllBytes(), StandardCharsets.US_ASCII);
@@ -47,19 +49,19 @@ final class RouterSsh implements AutoCloseable {
             String detail = error.getMessage() == null ? "" : error.getMessage();
             String message;
             if (detail.contains("HostKey") || detail.contains("host key"))
-                message = "Bu IP'deki cihaz beklenen HappRouter değil. HappVPN Wi-Fi ağını ve router adresini kontrol et.";
+                message = context.getString(R.string.router_expected_other);
             else if (detail.contains("Auth fail") || detail.contains("USERAUTH"))
                 message = password == null
-                        ? "Telefon henüz eşleştirilmemiş. Yönetici parolasıyla eşleştir veya açık anahtarı router'a ekle."
-                        : "Yönetici parolası yanlış veya SSH parolalı giriş kapalı. Rehberdeki SSH-Keys yolunu kullan.";
+                        ? context.getString(R.string.phone_not_paired)
+                        : context.getString(R.string.password_wrong);
             else
-                message = "Router'a ulaşılamadı. HappVPN Wi-Fi ağını ve router adresini kontrol et.";
+                message = context.getString(R.string.router_unreachable);
             throw new Exception(message, error);
         }
     }
 
     static void pairWithPassword(Context context, DeviceIdentity identity, char[] password) throws Exception {
-        if (password.length == 0) throw new IllegalArgumentException("Router yönetici parolasını girin.");
+        if (password.length == 0) throw new IllegalArgumentException(context.getString(R.string.admin_password_required));
         try (RouterSsh ssh = new RouterSsh(context, identity, password)) {
             String command = "umask 077; mkdir -p /etc/dropbear; "
                     + "touch /etc/dropbear/authorized_keys; chmod 600 /etc/dropbear/authorized_keys; "
@@ -100,11 +102,11 @@ final class RouterSsh implements AutoCloseable {
             channel.connect(15000);
             long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
             while (!channel.isClosed()) {
-                if (System.currentTimeMillis() > deadline) throw new Exception("Router işlemi zaman aşımına uğradı.");
+                if (System.currentTimeMillis() > deadline) throw new Exception(context.getString(R.string.ssh_timeout));
                 Thread.sleep(50);
             }
             if (channel.getExitStatus() != 0)
-                throw new Exception("Router komutu başarısız oldu (" + channel.getExitStatus() + ").");
+                throw new Exception(context.getString(R.string.ssh_command_failed_fmt, channel.getExitStatus()));
             return output.toString(StandardCharsets.UTF_8.name()).trim();
         } finally {
             channel.disconnect();
@@ -116,7 +118,7 @@ final class RouterSsh implements AutoCloseable {
     }
 
     void write(String path, byte[] content) throws Exception {
-        if (!path.matches("[/A-Za-z0-9._-]+")) throw new IllegalArgumentException("Dosya yolu geçersiz.");
+        if (!path.matches("[/A-Za-z0-9._-]+")) throw new IllegalArgumentException(context.getString(R.string.invalid_file_path));
         exec("umask 077; cat > " + path + " && chmod 600 " + path, content, 25);
     }
 

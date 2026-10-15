@@ -12,10 +12,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 final class DeviceIdentity {
+    private final Context context;
     private final File privateFile;
     private final File publicFile;
 
     DeviceIdentity(Context context) {
+        this.context = context;
         privateFile = new File(context.getFilesDir(), "router_identity");
         publicFile = new File(context.getFilesDir(), "router_identity.pub");
     }
@@ -23,14 +25,14 @@ final class DeviceIdentity {
     synchronized void ensure() throws Exception {
         if (privateFile.exists() && publicFile.exists()) return;
         if (privateFile.exists() || publicFile.exists())
-            throw new IllegalStateException("Telefon anahtarı eksik. Uygulama verisini temizleyip yeniden eşleştirin.");
+            throw new IllegalStateException(context.getString(R.string.identity_missing));
         KeyPair pair = KeyPair.genKeyPair(new JSch(), KeyPair.RSA, 3072);
         File temporary = new File(privateFile.getParentFile(), "router_identity.tmp");
         try {
             try (FileOutputStream output = new FileOutputStream(temporary)) {
                 pair.writePrivateKey(output);
             }
-            if (!temporary.renameTo(privateFile)) throw new Exception("Telefon anahtarı kaydedilemedi.");
+            if (!temporary.renameTo(privateFile)) throw new Exception(context.getString(R.string.identity_save_failed));
             String publicKey = "ssh-rsa " + Base64.encodeToString(pair.getPublicKeyBlob(), Base64.NO_WRAP)
                     + " happrouter-android\n";
             Files.write(publicFile.toPath(), publicKey.getBytes(StandardCharsets.US_ASCII));

@@ -18,7 +18,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-public final class GuideActivity extends Activity {
+public final class GuideActivity extends AppLanguage.Screen {
     private static final int BLUE = Color.rgb(34, 103, 234);
     private static final int DARK = Color.rgb(26, 35, 52);
     private static final int MUTED = Color.rgb(102, 115, 137);
@@ -52,37 +52,26 @@ public final class GuideActivity extends Activity {
         scroll.addView(page);
         setContentView(scroll);
 
-        Button back = button("←  HappRouter'a dön", false, this::finish);
+        Button back = button(getString(R.string.guide_back), false, this::finish);
         page.addView(back);
-        TextView title = text("Telefondan kurulum", 28, DARK, bold);
+        TextView title = text(getString(R.string.guide_title), 28, DARK, bold);
         title.setPadding(0, dp(15), 0, dp(3));
         page.addView(title);
-        TextView intro = text("Bilgisayar gerekmez. Bu adımları router'ın yanındaki Android telefonda sırayla yap.",
+        TextView intro = text(getString(R.string.guide_intro),
                 14, MUTED, regular);
         intro.setPadding(0, 0, 0, dp(18));
         page.addView(intro);
 
-        step(1, "HappVPN Wi-Fi ağına bağlan",
-                "Telefonun Wi-Fi ayarlarından HappVPN ağına gir. Android “İnternet yok” derse “Bağlı kal”ı seç. "
-                        + "Uygulama router'a yalnız aynı yerel ağdan erişebilir.");
-        step(2, "Router adresini doğrula",
-                "HappRouter ana ekranında varsayılan adres 192.168.1.1. Bağlanmıyorsa Wi-Fi ayrıntılarındaki "
-                        + "Ağ geçidi / Gateway adresini yazıp “Bağlan”a bas. Farklı router'ın adresi "
-                        + "güvenlik kontrolünden geçmez.");
-        step(3, "Telefonu bir kez eşleştir",
-                "Ana ekrandaki “Telefonu eşleştir” bölümüne router yönetici parolasını gir. Parola uygulamada "
-                        + "saklanmaz. Eşleştirme tamamlanınca “Yenile”ye bas.\n\n"
-                        + "Parola ile SSH girişi kapalıysa aşağıdan açık anahtarı kopyala. Router'ın yönetim "
-                        + "sayfasında System → Administration → SSH-Keys bölümüne yapıştırıp Add key'e bas. "
-                        + "Sonra uygulamada “Yenile”ye bas. Yönetici parolan yoksa açık anahtarı router'a "
-                        + "zaten erişebilen kişiye gönder; mevcut yetki olmadan eşleştirme yapılamaz.");
+        step(1, getString(R.string.guide_step1_title), getString(R.string.guide_step1_body));
+        step(2, getString(R.string.guide_step2_title), getString(R.string.guide_step2_body));
+        step(3, getString(R.string.guide_step3_title), getString(R.string.guide_step3_body));
         LinearLayout pairingActions = row();
         pairingActions.setPadding(0, 0, 0, dp(14));
         page.addView(pairingActions);
-        Button copy = button("Açık anahtarı kopyala", false, this::copyPublicKey);
+        Button copy = button(getString(R.string.guide_copy_key), false, this::copyPublicKey);
         pairingActions.addView(copy, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        Button web = button("Router sayfası", false, () -> {
+        Button web = button(getString(R.string.guide_router_page), false, () -> {
             Intent browser = new Intent(Intent.ACTION_VIEW,
                     Uri.parse("http://" + RouterAddress.get(this)));
             startActivity(browser);
@@ -92,26 +81,13 @@ public final class GuideActivity extends Activity {
         webSpace.leftMargin = dp(8);
         pairingActions.addView(web, webSpace);
 
-        step(4, "VPN aboneliğini ekle",
-                "Ana ekranda bir veya iki HTTPS abonelik adresini yapıştır ve “Sunucuları getir”e bas. "
-                        + "Tüm Shadowsocks sunucuları tek listede çıkar. happ://crypt5, VLESS ve Hysteria "
-                        + "bu router'da çalışmaz; Shadowsocks gerekir. Abonelik adresini kimseyle paylaşma.");
-        step(5, "Test et ve kur",
-                "“En uygun sunucuyu bul ve test et”e bas. Uygulama router üzerinden gecikmesi düşük çalışan "
-                        + "sunucuyu bulur. Aboneliğin bitiş gününü seç ve “Tüm sunucuları kur”a bas. "
-                        + "İstersen listeden bir sunucuyu elle seçebilirsin.");
-        step(6, "VPN çıkışını kontrol et",
-                "“VPN modu”nu açıp “Yenile”ye bas. “VPN açık” ve bir “Çıkış IP” görünüyorsa router "
-                        + "VPN üzerinden internete çıkıyor. Otomatik seçim açıkken router çalışan sunucular "
-                        + "arasından en düşük gecikmeliyi seçer.");
+        step(4, getString(R.string.guide_step4_title), getString(R.string.guide_step4_body));
+        step(5, getString(R.string.guide_step5_title), getString(R.string.guide_step5_body));
+        step(6, getString(R.string.guide_step6_title), getString(R.string.guide_step6_body));
 
         LinearLayout problems = card();
-        problems.addView(text("Bir adım çalışmazsa", 17, DARK, bold));
-        TextView tips = text("• Router bulunamıyor: Wi-Fi ve ağ geçidi adresini kontrol et.\n"
-                + "• Host key hatası: Bu IP başka router'a ait. Doğru ağa bağlan.\n"
-                + "• Eşleştirme hatası: Parolayı kontrol et veya SSH-Keys yolunu kullan.\n"
-                + "• Abonelik inmiyor: Profilleri mobil veriyle getir, testten önce HappVPN Wi-Fi'ye dön.\n"
-                + "• VPN testi geçmiyor: Başka Shadowsocks sunucusu dene; mevcut bağlantı korunur.",
+        problems.addView(text(getString(R.string.guide_troubleshoot_title), 17, DARK, bold));
+        TextView tips = text(getString(R.string.guide_troubleshoot_body),
                 13, MUTED, regular);
         tips.setPadding(0, dp(9), 0, 0);
         tips.setLineSpacing(dp(4), 1f);
@@ -141,10 +117,10 @@ public final class GuideActivity extends Activity {
         try {
             String key = new DeviceIdentity(this).publicKey();
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(ClipData.newPlainText("HappRouter açık anahtar", key));
-            Toast.makeText(this, "Açık anahtar kopyalandı", Toast.LENGTH_SHORT).show();
+            clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.key_clip_label), key));
+            Toast.makeText(this, R.string.guide_key_copied, Toast.LENGTH_SHORT).show();
         } catch (Exception error) {
-            Toast.makeText(this, "Anahtar okunamadı", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, R.string.guide_key_failed, Toast.LENGTH_LONG).show();
         }
     }
 

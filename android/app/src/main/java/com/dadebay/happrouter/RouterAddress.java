@@ -12,7 +12,7 @@ final class RouterAddress {
     }
 
     static void save(Context context, String address) {
-        if (!valid(address)) throw new IllegalArgumentException("Yerel router IPv4 adresini girin.");
+        if (!valid(address)) throw new IllegalArgumentException(context.getString(R.string.invalid_router_ip));
         context.getSharedPreferences("router", Context.MODE_PRIVATE).edit()
                 .putString("address", address).apply();
     }
