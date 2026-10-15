@@ -67,6 +67,23 @@ class ProfileMigrationTests(unittest.TestCase):
         self.assertIn('cp /etc/happvpn/ss-client.json.last-good /etc/happvpn/ss-client.json', commands)
         self.assertIn('printf auto > /etc/happvpn/selection-mode', commands)
 
+    def test_auto_install_tries_next_server_when_fastest_fails_vpn_check(self):
+        profiles = routerctl.parse_profiles(SAMPLE)
+        with patch.object(routerctl, 'ssh', side_effect=self.fake_ssh), \
+             patch.object(routerctl, 'profile_candidates', return_value=list(reversed(profiles))), \
+             patch.object(routerctl, 'active_test', side_effect=[
+                 RuntimeError('fastest server rejected VPN'), '203.0.113.2', '203.0.113.2']), \
+             patch.object(routerctl, '_cleanup_candidate'), \
+             patch.object(routerctl, 'emit') as emit:
+            routerctl.install_profile(SAMPLE, int(time.time()) + 3600)
+
+        commands = '\n'.join(command for command, _ in self.calls)
+        self.assertIn('profiles.stage/ss-01.json', commands)
+        self.assertIn('profiles.stage/ss-00.json', commands)
+        self.assertEqual(emit.call_args.args[0]['count'], 2)
+        self.assertEqual(emit.call_args.args[0]['tag'], 'ss-00')
+        self.assertIn('printf auto > /etc/happvpn/selection-mode', commands)
+
 
 class MultipleSubscriptionTests(unittest.TestCase):
     def test_two_https_subscriptions_form_one_server_list(self):
@@ -105,6 +122,16 @@ class ServerSelectionTests(unittest.TestCase):
 
 
 class CandidateProbeTests(unittest.TestCase):
+    def test_ranks_all_reachable_profiles_by_router_latency(self):
+        profiles = routerctl.parse_profiles(SAMPLE)
+        def fake_ssh(command, stdin=None, timeout=60):
+            if command.startswith('cat /tmp/happ-profile-rank-'):
+                return b'ss-00\t1\t350\t1\nss-01\t1\t90\t1\n'
+            return b''
+        with patch.object(routerctl, 'ssh', side_effect=fake_ssh):
+            ranked = routerctl.profile_candidates(profiles)
+        self.assertEqual([node['tag'] for node, _ in ranked], ['ss-01', 'ss-00'])
+
     def test_exit_probe_connects_to_ipv4_destination(self):
         answer = [(routerctl.socket.AF_INET, routerctl.socket.SOCK_STREAM, 6,
                    '', ('34.160.111.145', 443))]
@@ -136,6 +163,17 @@ class CandidateProbeTests(unittest.TestCase):
         self.assertIn('rm -f /tmp/happ-ss-probe.pid', commands)
         test_exit.assert_called_once_with(emit_result=False, remote_port=11083)
         self.assertEqual(emit.call_args.args[0]['exitIP'], '203.0.113.1')
+
+    def test_auto_probe_falls_back_to_next_verified_server(self):
+        profiles = routerctl.parse_profiles(SAMPLE)
+        with patch.object(routerctl, 'profile_candidates', return_value=list(reversed(profiles))), \
+             patch.object(routerctl, 'ssh', return_value=b''), \
+             patch.object(routerctl, 'active_test', side_effect=[
+                 RuntimeError('first server failed'), '203.0.113.2']) as test_exit, \
+             patch.object(routerctl, 'emit') as emit:
+            routerctl.probe_profile(SAMPLE)
+        self.assertEqual(test_exit.call_count, 2)
+        self.assertEqual(emit.call_args.args[0]['tag'], 'ss-00')
 
     def test_probe_failure_cleans_temporary_profile(self):
         with patch.object(routerctl, 'ssh', return_value=b'') as ssh, \

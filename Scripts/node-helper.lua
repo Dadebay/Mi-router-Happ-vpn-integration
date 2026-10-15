@@ -29,7 +29,7 @@ if arg[1] == "rank" then
         if a.delay == b.delay then return a.tag < b.tag end
         return a.delay < b.delay
     end)
-    for index = 1, math.min(#candidates, 5) do print(candidates[index].tag) end
+    for index = 1, #candidates do print(candidates[index].tag) end
     os.exit(#candidates > 0 and 0 or 1)
 end
 

@@ -326,32 +326,75 @@ def node_preview(source):
           'note': 'Sunucu profilleri okundu; bağlantı henüz test edilmedi.'})
 
 
+def profile_candidates(profiles, selected_tag=None):
+    if selected_tag:
+        selected = next((entry for entry in profiles if entry[0]['tag'] == selected_tag), None)
+        if selected is None:
+            raise ValueError('Seçilen sunucu bu profilde bulunamadı.')
+        return [selected]
+    if len(profiles) == 1:
+        return profiles
+
+    prefix = f'/tmp/happ-profile-rank-{os.getpid()}'
+    source, results, script = prefix + '.tsv', prefix + '.results', prefix + '.lua'
+    probes = ''.join(f'{node["tag"]}\t{node["address"]}\t{node["port"]}\n'
+                     for node, _ in profiles)
+    try:
+        ssh(f'umask 077; cat > {source}', stdin=probes.encode('utf-8'))
+        ssh(f'umask 077; cat > {script}',
+            stdin=(script_directory() / 'probe-nodes.lua').read_bytes())
+        ssh(f'lua5.3 {script} {source} {results}',
+            timeout=max(30, min(450, len(profiles) * 3 + 10)))
+        measurements = ssh(f'cat {results}').decode('ascii', 'replace')
+    finally:
+        try:
+            ssh(f'rm -f {source} {results} {results}.tmp {script}')
+        except Exception:
+            pass
+
+    by_tag = {node['tag']: (node, config) for node, config in profiles}
+    ranked = []
+    for line in measurements.splitlines():
+        parts = line.split('\t')
+        if len(parts) != 4 or parts[0] not in by_tag or parts[1] != '1':
+            continue
+        try:
+            delay = int(parts[2])
+        except ValueError:
+            continue
+        if delay >= 0:
+            ranked.append((delay, by_tag[parts[0]]))
+    ranked.sort(key=lambda entry: entry[0])
+    if not ranked:
+        raise RuntimeError('Eklenen sunuculara router üzerinden ulaşılamadı; çalışan VPN korundu.')
+    return [entry for _, entry in ranked]
+
+
 def probe_profile(source, selected_tag=None):
     profiles = parse_profiles(source)
-    if len(profiles) > 1 and not selected_tag:
-        raise ValueError('Test edilecek sunucuyu listeden seçin.')
-    chosen = next(((node, config) for node, config in profiles
-                   if node['tag'] == (selected_tag or 'ss-00')), None)
-    if not chosen:
-        raise ValueError('Seçilen sunucu bu profilde bulunamadı.')
-    node, config = chosen
+    candidates = profile_candidates(profiles, selected_tag)
     candidate = '/tmp/happ-ss-probe.json'
     pid = '/tmp/happ-ss-probe.pid'
     log = '/tmp/happ-ss-probe.log'
-    try:
-        ssh(f'umask 077; cat > {candidate} && chmod 600 {candidate}',
-            stdin=json.dumps(config, ensure_ascii=False).encode('utf-8'), timeout=20)
-        ssh(f'ss-local -c {candidate} -b 127.0.0.1 -l 11083 '
-            f'-f {pid} >{log} 2>&1', timeout=15)
+    last_error = None
+    for node, config in candidates:
         try:
+            ssh(f'umask 077; cat > {candidate} && chmod 600 {candidate}',
+                stdin=json.dumps(config, ensure_ascii=False).encode('utf-8'), timeout=20)
+            ssh(f'ss-local -c {candidate} -b 127.0.0.1 -l 11083 '
+                f'-f {pid} >{log} 2>&1', timeout=15)
             exit_ip = active_test(emit_result=False, remote_port=11083)
+            emit({'ok': True, 'exitIP': exit_ip, 'tag': node['tag'],
+                  'note': 'En uygun çalışan sunucu doğrulandı; kurulu profil değiştirilmedi.'})
+            return
         except Exception as exc:
-            raise RuntimeError(f'Yeni sunucunun VPN çıkışı doğrulanamadı: {exc}') from exc
-        emit({'ok': True, 'exitIP': exit_ip, 'tag': node['tag'],
-              'note': 'Yeni sunucu çalışıyor; router profili değiştirilmedi.'})
-    finally:
-        ssh(f'if [ -s {pid} ]; then kill $(cat {pid}) 2>/dev/null || true; fi; '
-            f'rm -f {pid} {candidate} {log}', timeout=15)
+            last_error = exc
+        finally:
+            ssh(f'if [ -s {pid} ]; then kill $(cat {pid}) 2>/dev/null || true; fi; '
+                f'rm -f {pid} {candidate} {log}', timeout=15)
+    if selected_tag and last_error:
+        raise RuntimeError(f'Yeni sunucunun VPN çıkışı doğrulanamadı: {last_error}') from last_error
+    raise RuntimeError('Eklenen sunucuların VPN çıkışı doğrulanamadı; çalışan profil korundu.') from last_error
 
 
 def _cleanup_candidate():
@@ -365,13 +408,8 @@ def install_profile(source, expires_at, selected_tag=None):
     if not isinstance(expires_at, int) or expires_at < int(time.time()):
         raise ValueError('Gelecekteki abonelik bitiş tarihini seçin.')
     profiles = parse_profiles(source)
-    if len(profiles) > 1 and not selected_tag:
-        raise ValueError('Kurulacak sunucuyu listeden seçin.')
-    chosen = next(((node, config) for node, config in profiles
-                   if node['tag'] == (selected_tag or 'ss-00')), None)
-    if not chosen:
+    if selected_tag and not any(node['tag'] == selected_tag for node, _ in profiles):
         raise ValueError('Seçilen sunucu bu profilde bulunamadı.')
-    node, _ = chosen
     previous_selection = ssh('cat /etc/happvpn/selection-mode 2>/dev/null || echo auto').decode('ascii').strip()
     if previous_selection not in ('auto', 'manual'):
         previous_selection = 'auto'
@@ -402,18 +440,26 @@ def install_profile(source, expires_at, selected_tag=None):
         ssh('umask 077; cat > /etc/happvpn/probes.tsv.stage',
             stdin=probes.encode('utf-8'))
 
-        # The selected server must pass a real TLS request before the live service changes.
+        # Rank every imported profile, then authenticate candidates before touching the live service.
+        chosen = None
+        for node, _ in profile_candidates(profiles, selected_tag):
+            candidate = f'/etc/happvpn/profiles.stage/{node["tag"]}.json'
+            try:
+                ssh(f'ss-local -c {candidate} -b 127.0.0.1 -l 11082 '
+                    '-f /tmp/happ-ss-candidate.pid >/tmp/happ-ss-candidate.log 2>&1', timeout=15)
+                active_test(emit_result=False, remote_port=11082)
+                chosen = node
+                break
+            except Exception:
+                pass
+            finally:
+                ssh('if [ -s /tmp/happ-ss-candidate.pid ]; then '
+                    'kill $(cat /tmp/happ-ss-candidate.pid) 2>/dev/null || true; '
+                    'rm -f /tmp/happ-ss-candidate.pid; fi', timeout=15)
+        if chosen is None:
+            raise RuntimeError('Yeni sunucuların VPN çıkışı doğrulanamadı; çalışan profil korundu.')
+        node = chosen
         candidate = f'/etc/happvpn/profiles.stage/{node["tag"]}.json'
-        try:
-            ssh(f'ss-local -c {candidate} -b 127.0.0.1 -l 11082 '
-                '-f /tmp/happ-ss-candidate.pid >/tmp/happ-ss-candidate.log 2>&1', timeout=15)
-            active_test(emit_result=False, remote_port=11082)
-        except Exception as exc:
-            raise RuntimeError('Yeni sunucunun VPN çıkışı doğrulanamadı; çalışan profil korundu.') from exc
-        finally:
-            ssh('if [ -s /tmp/happ-ss-candidate.pid ]; then '
-                'kill $(cat /tmp/happ-ss-candidate.pid) 2>/dev/null || true; '
-                'rm -f /tmp/happ-ss-candidate.pid; fi', timeout=15)
 
         ssh('cp /etc/happvpn/ss-client.json /etc/happvpn/ss-client.json.last-good')
         ssh(f'cp {candidate} /etc/happvpn/ss-client.json.new && '
@@ -472,7 +518,7 @@ def install_profile(source, expires_at, selected_tag=None):
         ssh('/etc/happvpn/probe-nodes.lua', timeout=30)
     except Exception:
         pass
-    emit({'ok': True, 'count': len(profiles), 'exitIP': exit_ip,
+    emit({'ok': True, 'count': len(profiles), 'exitIP': exit_ip, 'tag': node['tag'],
           'note': 'Sunucular kaydedildi. En düşük gecikmeli çalışan sunucu otomatik seçilecek.'})
 
 
